@@ -42,7 +42,8 @@ async function readBody(request) {
   return { code, code_verifier, redirect_uri };
 }
 
-// GitHub's answer for the exchange, or null when it is not a usable answer.
+// GitHub's answer for the exchange as {ok, data} (data a JSON object), or null when GitHub could not be reached or
+// did not answer with one. Its HTTP status is not enough: an unknown client_id is a 404 with {"error":"Not Found"}.
 async function exchange(env, fields) {
   try {
     const res = await fetch(GITHUB, {
@@ -50,9 +51,8 @@ async function exchange(env, fields) {
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ client_id: env.CLIENT_ID, client_secret: env.CLIENT_SECRET, ...fields }),
     });
-    if (!res.ok) return null;
     const data = await res.json();
-    return data !== null && typeof data === 'object' ? data : null;
+    return data !== null && typeof data === 'object' && !Array.isArray(data) ? { ok: res.ok, data } : null;
   } catch {
     return null;
   }
@@ -77,10 +77,11 @@ export default {
     const fields = await readBody(request);
     if (!fields) return reply(request, 400, { error: 'bad_request' });
 
-    const data = await exchange(env, fields);
-    if (!data) return reply(request, 502, { error: 'github_unreachable' });
-    if (typeof data.error === 'string') return reply(request, 400, { error: data.error });
-    if (typeof data.access_token !== 'string' || !data.access_token) return reply(request, 502, { error: 'github_unreachable' });
+    const answer = await exchange(env, fields);
+    if (!answer) return reply(request, 502, { error: 'github_unreachable' });
+    const { ok, data } = answer;
+    if (typeof data.error === 'string') return reply(request, 400, { error: data.error }); // whatever GitHub's status
+    if (!ok || typeof data.access_token !== 'string' || !data.access_token) return reply(request, 502, { error: 'github_unreachable' });
 
     const token = { access_token: data.access_token };
     if (Number.isFinite(data.expires_in)) token.expires_in = data.expires_in;

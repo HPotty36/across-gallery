@@ -348,6 +348,15 @@ class FakeLoginTests(unittest.TestCase):
         self.fake.handle("PUT", "/_fake/token", {}, b'{"token": "rotated"}')
         self.assertEqual(self.token(self.new_code())[1]["access_token"], "rotated")  # the token the fake accepts right now
 
+    def test_token_needs_the_redirect_the_code_was_sent_to(self):
+        elsewhere = "http://localhost:8000/admin/"
+        code_for = lambda back: parse_qs(urlsplit(self.authorize(redirect_uri=back)[1]).query)["code"][0]
+        code = self.new_code()
+        self.assertEqual(self.token(code, redirect_uri=elsewhere), (400, {"error": "redirect_uri_mismatch"}))
+        self.assertEqual(self.token(code), (400, {"error": "bad_verification_code"}))  # the wrong try used the code up
+        self.assertEqual(self.token(code_for(elsewhere)), (400, {"error": "redirect_uri_mismatch"}))
+        self.assertEqual(self.token(code_for(elsewhere), redirect_uri=elsewhere)[0], 200)
+
     def test_token_bodies_missing_a_field_are_bad_requests(self):
         code = self.new_code()
         for label, change in (("no code", {"code": None}), ("no code_verifier", {"code_verifier": None}),

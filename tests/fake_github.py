@@ -11,7 +11,8 @@ and actions/workflows/{file}/runs.
 
 It also plays the admin page's login, which needs no token: GET /login/oauth/authorize is GitHub's login page
 (it asks nobody and sends the browser straight back with a code, or with access_denied) and POST /_auth/token is
-the code-exchange Worker (it answers {access_token, expires_in} when the PKCE verifier fits the code's challenge).
+the code-exchange Worker (it answers {access_token, expires_in} when the PKCE verifier fits the code's challenge and
+the redirect_uri is the one the code was sent to).
 PUT /_fake/login {mode, expires_in?} picks how login behaves: ok, deny, down (the Worker cannot reach GitHub) or
 reader (the account may not push to the repo).
 
@@ -197,7 +198,7 @@ class FakeGitHub:
         self._runs = {}      # (repo, workflow file) -> run
         self._login_mode = "ok"
         self._expires_in = _LOGIN_LIFETIME
-        self._codes = {}     # login code handed out by the login page, not yet exchanged -> its PKCE challenge
+        self._codes = {}     # login code handed out by the login page, not yet exchanged -> (its PKCE challenge, redirect_uri)
         self._clock = itertools.count(_FIRST_COMMIT_TIME)
         self._lock = threading.RLock()
         self._server = None
@@ -407,14 +408,15 @@ class FakeGitHub:
                 answer["error"] = "access_denied"
             else:
                 answer["code"] = secrets.token_urlsafe(16)
-                self._codes[answer["code"]] = first("code_challenge")
+                self._codes[answer["code"]] = (first("code_challenge"), back)
         if first("state"):
             answer["state"] = first("state")
         return 302, Redirect(back + ("&" if "?" in back else "?") + urlencode(answer))
 
     def _token(self, body):
         """The code-exchange Worker: {code, code_verifier, redirect_uri} in, {access_token, expires_in} out. Its errors are
-        {"error": ...}, not GitHub's REST error bodies. A code is used up by its first try, right or wrong."""
+        {"error": ...}, not GitHub's REST error bodies. A code is used up by its first try, right or wrong. Like GitHub,
+        it wants the redirect_uri the code was sent to, so a page that works it out differently on the way back fails."""
         try:
             data = self._json(body)
         except _HttpError:
@@ -422,13 +424,17 @@ class FakeGitHub:
         fields = [data.get(name) for name in ("code", "code_verifier", "redirect_uri")]
         if not all(isinstance(field, str) and field for field in fields):
             return 400, {"error": "bad_request"}
-        code, verifier, _ = fields
+        code, verifier, back = fields
         with self._lock:
-            challenge = self._codes.pop(code, None)
+            challenge, sent_to = self._codes.pop(code, (None, None))
             if self._login_mode == "down":
                 return 502, {"error": "github_unreachable"}
+            if challenge is None:
+                return 400, {"error": "bad_verification_code"}
+            if back != sent_to:
+                return 400, {"error": "redirect_uri_mismatch"}
             fits = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("utf-8")).digest()).rstrip(b"=").decode("ascii")
-            if challenge is None or challenge != fits:
+            if challenge != fits:
                 return 400, {"error": "bad_verification_code"}
             return 200, {"access_token": self.token, "expires_in": self._expires_in}
 

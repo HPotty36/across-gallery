@@ -93,12 +93,29 @@ test('a GitHub error is 400', async () => {
   assert.equal(res.headers.get('Access-Control-Allow-Origin'), SITE);
 });
 
+test('a GitHub error is 400 whatever its HTTP status', async () => {
+  // an unknown client_id (the numeric App ID pasted instead of the Client ID) is HTTP 404 {"error":"Not Found"}
+  for (const status of [404, 401, 500]) {
+    mock.restoreAll();
+    stubGithub(Response.json({ error: 'Not Found' }, { status }));
+    const res = await worker.fetch(post(GOOD), ENV);
+    assert.equal(res.status, 400, String(status));
+    assert.deepEqual(await res.json(), { error: 'Not Found' });
+    assert.equal(res.headers.get('Access-Control-Allow-Origin'), SITE);
+  }
+});
+
 test('GitHub out of reach is 502', async () => {
   const replies = [
     () => { throw new TypeError('fetch failed'); },
     () => new Response('oops', { status: 500 }),
+    () => new Response('<html>', { status: 404 }),
     () => new Response('<html>', { status: 200 }),
     () => Response.json({}),
+    () => Response.json({}, { status: 500 }),
+    () => Response.json({ error: 5 }),
+    () => Response.json([{ error: 'x' }]),
+    () => Response.json({ access_token: 'ghu_x' }, { status: 500 }),
   ];
   for (const reply of replies) {
     mock.restoreAll();
