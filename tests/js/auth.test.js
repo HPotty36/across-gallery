@@ -4,8 +4,9 @@ import { CONFIG, resolveConfig } from '../../admin/config.js';
 import {
   LOGIN_KEY, AUTO_KEY, SIGNED_IN_KEY, OLD_TOKEN_KEY, LOGIN_MAX_AGE_MS, DEFAULT_LIFETIME_S, RENEW_BEFORE_MS, MESSAGES,
   LoginError, base64url, challengeFor, newLogin, saveLogin, takeLogin, remember, recall, forget, redirectUri,
-  authorizeUrl, readReturn, checkReturn, exchange, bootAction, needsLogin, rejectedMessage,
+  authorizeUrl, readReturn, checkReturn, exchange, bootAction, needsLogin, rejectedMessage, loginFailureMessage,
 } from '../../admin/lib/auth.js';
+import { AuthError, GitHubError } from '../../admin/lib/github.js';
 
 const at = (href) => new URL(href);
 const URL_SAFE = /^[A-Za-z0-9_-]+$/;
@@ -259,4 +260,15 @@ test('renewal window', () => {
 test('why GitHub said no', () => {
   assert.equal(rejectedMessage(401), MESSAGES.expired);
   assert.equal(rejectedMessage(403), MESSAGES.notAllowed);
+});
+
+test('what a failed login says', () => {
+  assert.equal(loginFailureMessage(new LoginError(MESSAGES.failed)), MESSAGES.failed);
+  assert.equal(loginFailureMessage(new LoginError(MESSAGES.cancelled)), MESSAGES.cancelled);
+  // a new token GitHub refuses at once: 401 is a failed login, not an ended one; 403 an account that may not write here
+  assert.equal(loginFailureMessage(new AuthError(401)), MESSAGES.failed);
+  assert.equal(loginFailureMessage(new AuthError(403)), MESSAGES.notAllowed);
+  assert.equal(loginFailureMessage(new GitHubError('인터넷 연결을 확인해 주세요', 0)), '인터넷 연결을 확인해 주세요');
+  assert.equal(loginFailureMessage(new TypeError('github.canPush is not a function')), MESSAGES.failed);
+  assert.equal(loginFailureMessage(undefined), MESSAGES.failed);
 });

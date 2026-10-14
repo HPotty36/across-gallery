@@ -189,7 +189,7 @@ function say(node, text, isError = false) {
   node.classList.toggle('is-error', Boolean(text) && isError);
 }
 
-/** The message to show for a failed action; null for a rejected token (the page is already back at setup). */
+/** The message to show for a failed action; null for a rejected token (the page is already back at the login screen). */
 function problem(error) {
   if (error instanceof AuthError) return null;
   if (error instanceof GalleryError || error instanceof GitHubError) return error.message;

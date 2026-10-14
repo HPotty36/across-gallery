@@ -17,7 +17,8 @@
 import { resolveConfig } from './config.js';
 import {
   AUTO_KEY, MESSAGES, OLD_TOKEN_KEY, SIGNED_IN_KEY, LoginError, authorizeUrl, bootAction, challengeFor, checkReturn,
-  exchange, forget, needsLogin, newLogin, readReturn, recall, redirectUri, rejectedMessage, remember, saveLogin, takeLogin,
+  exchange, forget, loginFailureMessage, needsLogin, newLogin, readReturn, recall, redirectUri, rejectedMessage, remember,
+  saveLogin, takeLogin,
 } from './lib/auth.js';
 import { AuthError, GitHub, GitHubError } from './lib/github.js';
 import { SiteStatus } from './lib/sitestatus.js';
@@ -120,9 +121,16 @@ function tokenRejected(status) {
 
 // --- logging in ------------------------------------------------------------------------------
 
+/** Our own errors say what went wrong; anything else (a bug, a missing browser feature) also goes to the console. */
+function report(error) {
+  if (!(error instanceof LoginError || error instanceof GitHubError)) console.error(error); // never holds the token
+}
+
 /**
- * Off to GitHub. The button stays aria-disabled (clicks ignored, focus kept) until the page is left; the login in
- * progress waits in sessionStorage for the way back.
+ * Off to GitHub. The button stays aria-disabled (clicks ignored, focus kept) until the page is left, or until it
+ * shows again without having left; the login in progress waits in sessionStorage for the way back. GitHub takes this
+ * page's place in the history (location.replace), so Back after logging in does not land on the page before the
+ * login (which would show the button, or log in again).
  */
 async function startLogin() {
   const button = $('login-start');
@@ -135,8 +143,9 @@ async function startLogin() {
   }
   try {
     const challenge = await challengeFor(login.verifier);
-    window.location.assign(authorizeUrl(config, { state: login.state, challenge, redirect: redirectUri(window.location, config) }));
-  } catch {
+    window.location.replace(authorizeUrl(config, { state: login.state, challenge, redirect: redirectUri(window.location, config) }));
+  } catch (error) {
+    report(error);
     openLogin(MESSAGES.failed, true); // no WebCrypto here: the button must not stay dead
   }
 }
@@ -155,34 +164,44 @@ async function finishLogin(got) {
     return;
   }
   say($('boot'), MESSAGES.starting);
+  let answer;
+  let github;
   try {
-    const answer = await exchange(config, { code: checked.code, verifier: checked.verifier, redirect });
-    const github = new GitHub({ token: answer.token, api: config.api });
+    answer = await exchange(config, { code: checked.code, verifier: checked.verifier, redirect });
+    github = new GitHub({ token: answer.token, api: config.api });
     if (!(await github.canPush(config.repo))) {
       openLogin(MESSAGES.notAllowed, true); // the token goes with `github`
       return;
     }
-    remember(local, SIGNED_IN_KEY, '1');
-    forget(session, AUTO_KEY);
-    expiresAt = answer.expiresAt;
-    enter(github);
   } catch (error) {
-    // a token GitHub refuses at once is a failed login, not an ended one; other GitHub errors say what went wrong
-    const told = error instanceof LoginError || (error instanceof GitHubError && !(error instanceof AuthError));
-    openLogin(told ? error.message : MESSAGES.failed, true);
+    report(error);
+    openLogin(loginFailureMessage(error), true);
+    return;
   }
+  // outside the try: a view that throws must not leave a live client under a "failed" message
+  remember(local, SIGNED_IN_KEY, '1');
+  forget(session, AUTO_KEY);
+  expiresAt = answer.expiresAt;
+  enter(github);
 }
 
 $('login-start').addEventListener('click', () => startLogin());
 
-// back in this tab after a while: a token that has ended (or soon will) is let go before anything is typed
+// Back in this tab after a while. Logged in: a token that has ended (or soon will) is let go before anything is
+// typed. Not logged in: a login button left disabled works again, for when the page never left (the GitHub app on a
+// phone took the login link, say); nothing is said.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !client || !needsLogin(expiresAt, Date.now())) return;
+  if (document.visibilityState !== 'visible') return;
+  if (!client) {
+    $('login-start').removeAttribute('aria-disabled');
+    return;
+  }
+  if (!needsLogin(expiresAt, Date.now())) return;
   lock();
   openLogin(MESSAGES.expired, true);
 });
 
-// Back from GitHub with the browser's back button: the page may come back exactly as it was left (the button
+// A page brought back with the browser's back or forward button may come back exactly as it was left (the button
 // disabled, or "로그인하는 중…"). Offer the button again; never go to GitHub on its own from here.
 window.addEventListener('pageshow', (event) => {
   if (event.persisted && !client) openLogin();

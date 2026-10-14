@@ -4,6 +4,7 @@
 // who keeps it in memory only (storage here holds just the login in progress and two flags).
 
 import { CONFIG } from '../config.js';
+import { AuthError, GitHubError } from './github.js';
 
 export const LOGIN_KEY = 'nocturne.login'; // sessionStorage: {state, verifier, at} of the login in progress
 export const AUTO_KEY = 'nocturne.auto'; // sessionStorage: the automatic sign-in was already tried in this tab
@@ -192,4 +193,16 @@ export function needsLogin(expiresAt, now) {
  */
 export function rejectedMessage(status) {
   return status === 401 ? MESSAGES.expired : MESSAGES.notAllowed;
+}
+
+/**
+ * What to say when a login fails after GitHub sent the person back (the code exchange or the first look at the
+ * repository). A new token GitHub refuses at once is a failed login, not an ended one; a 403 is an account that may
+ * not write here. Other GitHub errors say what went wrong (offline, rate limit); anything else is a plain failure.
+ */
+export function loginFailureMessage(error) {
+  if (error instanceof LoginError) return error.message;
+  if (error instanceof AuthError) return error.status === 403 ? MESSAGES.notAllowed : MESSAGES.failed;
+  if (error instanceof GitHubError) return error.message;
+  return MESSAGES.failed;
 }

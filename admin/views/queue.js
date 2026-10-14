@@ -559,7 +559,7 @@ function place(parent, node, index) {
   if (at !== node) parent.insertBefore(node, at);
 }
 
-/** The message to show for a failed action; null for a rejected token (the page is already back at setup). */
+/** The message to show for a failed action; null for a rejected token (the page is already back at the login screen). */
 function problem(error) {
   if (error instanceof AuthError) return null;
   if (error instanceof GitHubError || error instanceof GalleryError || error instanceof ImageError || error instanceof QueueError) return error.message;
@@ -576,7 +576,7 @@ function titleOf(data, file) {
 
 const hasFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files');
 
-let view = null; // the tab on the page while unlocked
+let view = null; // the tab on the page while logged in
 
 /**
  * Show (or bring up to date) the "새 사진" tab in `root`. ctx = {gh, config, refreshStatus, reloadExhibit}.
