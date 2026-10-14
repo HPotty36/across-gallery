@@ -75,7 +75,7 @@
   - 출처가 다르면 403. 본문이 JSON이 아니거나 값이 문자열이 아니거나 너무 길면(각 512자 넘음) 400.
   - GitHub `POST https://github.com/login/oauth/access_token`에 `client_id`, `client_secret`, `code`, `code_verifier`, `redirect_uri`를 JSON으로 보내고 `Accept: application/json`으로 받는다.
   - GitHub가 `access_token`을 주면 `200 {access_token, expires_in}`만 돌려준다. `refresh_token`과 나머지는 버린다.
-  - GitHub가 `{error}`를 주면 `400 {error}`. GitHub에 닿지 못하거나 이상한 답이면 `502 {error: "github_unreachable"}`.
+  - GitHub가 `{error}`를 주면 HTTP 상태와 상관없이 `400 {error}` (잘못된 `client_id`는 404 `{"error":"Not Found"}`로 온다). GitHub에 닿지 못하거나 JSON이 아니거나 `access_token`도 `error`도 없으면 `502 {error: "github_unreachable"}`.
 - 그 밖의 경로·메서드는 404 / 405.
 - 토큰과 코드를 로그에 남기지 않는다.
 
@@ -111,7 +111,7 @@
 1. `state` = 무작위 16바이트, `verifier` = 무작위 32바이트 (둘 다 base64url). `challenge` = base64url(SHA-256(verifier)).
 2. `nocturne.login`에 `{state, verifier, at: 지금}` 저장.
 3. `redirect_uri` = 지금 페이지 주소에서 `code`·`state`·`error` 등을 뺀 것. 실제로는 `https://hpotty36.github.io/nocturne/admin/`, 시험 모드에서는 `?api=`가 붙은 localhost 주소.
-4. `location.assign(authorize?client_id&redirect_uri&state&code_challenge&code_challenge_method=S256)`.
+4. `location.replace(authorize?client_id&redirect_uri&state&code_challenge&code_challenge_method=S256)`. 방문 기록에서 이 페이지를 GitHub 화면으로 바꾸므로, 로그인한 뒤 뒤로 가기를 눌러도 로그인 전 페이지로 돌아오지 않는다.
 
 ### 페이지를 열 때
 
@@ -125,7 +125,7 @@
 2. `nocturne.login`을 읽고 바로 지운다. 없거나, `state`가 다르거나, 10분이 넘었으면 → 코드를 버리고 로그인 화면.
 3. `error=access_denied` → 로그인 화면 + "로그인을 취소했어요". 다른 `error` → "로그인하지 못했어요. 잠시 뒤 다시 해 주세요".
 4. `exchange`에 `{code, code_verifier, redirect_uri}` POST. 실패(네트워크, 4xx, 5xx, 이상한 답) → 로그인 화면 + "로그인하지 못했어요. 잠시 뒤 다시 해 주세요".
-5. 받은 토큰으로 GitHub 클라이언트를 만들고 지금처럼 `canPush(repo)`를 확인. 쓸 권한이 없으면 토큰을 버리고 → 로그인 화면 + "이 GitHub 계정으로는 관리할 수 없어요".
+5. 받은 토큰으로 GitHub 클라이언트를 만들고 지금처럼 `canPush(repo)`를 확인. 쓸 권한이 없거나 GitHub가 403으로 거절하면 토큰을 버리고 → 로그인 화면 + "이 GitHub 계정으로는 관리할 수 없어요".
 6. 성공 → `nocturne.signedIn` 저장, `nocturne.auto` 지움, 관리 화면.
 
 `nocturne.auto`는 실패하면 남는다. 그래서 같은 탭에서 다시 열어도 자동으로 다녀오지 않고 버튼이 나온다 (GitHub와 페이지 사이를 끝없이 오가지 않는다). 버튼은 언제나 누를 수 있다.
@@ -154,14 +154,14 @@
 ## 4. 가짜 GitHub (`tests/fake_github.py`)
 
 - `GET /login/oauth/authorize`: `redirect_uri`로 302. 쿼리에 `code`(무작위, 한 번만 씀)와 받은 `state`를 붙인다. `code_challenge`를 그 코드와 함께 기억한다.
-- `POST /_auth/token` (Worker 역할, `http://localhost:<포트>` 출처에 CORS 허락): `code`가 있고 아직 안 썼고 base64url(SHA-256(`code_verifier`))가 기억한 challenge와 같으면 `{access_token: <가짜 토큰>, expires_in: 28800}`. 아니면 `400 {error: "bad_verification_code"}`.
+- `POST /_auth/token` (Worker 역할, `http://localhost:<포트>` 출처에 CORS 허락): `code`가 있고 아직 안 썼고 base64url(SHA-256(`code_verifier`))가 기억한 challenge와 같으면 `{access_token: <가짜 토큰>, expires_in: 28800}`. 아니면 `400 {error: "bad_verification_code"}`. `redirect_uri`가 그 코드를 보낸 주소와 다르면 진짜 GitHub처럼 `400 {error: "redirect_uri_mismatch"}`.
 - 제어 `PUT /_fake/login` `{mode}`: `ok`(기본), `deny`(authorize가 `error=access_denied`로 돌려보냄), `down`(token이 502), `reader`(토큰은 주지만 저장소 `permissions.push`가 false).
 - 이것으로 시험 모드에서 토큰 없이 버튼만 눌러 들어간다.
 
 ## 5. 시험
 
 - `tests/js/auth.test.js`: PKCE challenge가 RFC 7636 예시 값과 같음, 로그인 주소의 매개변수, `redirect_uri`가 `code`·`state`는 빼고 `?api=`는 남김, 돌아옴 처리(맞는 state / 다른 state / 오래된 값 / 값 없음 / `access_denied` / 다른 error), 교환 실패 종류별 메시지, 페이지를 열 때 무엇을 할지 고르는 규칙(돌아옴 / 자동 / 버튼, `nocturne.auto`가 있으면 자동 안 함), 만료 판단(15분 경계).
-- `tests/js/auth-worker.test.js`: `auth/worker.js`를 Node의 `Request`/`Response`와 가짜 `fetch`로 돌린다. 출처가 다르면 403, 사전 요청, 잘못된 본문 400, GitHub에 넘기는 값(client_secret 포함), 성공 시 `refresh_token`이 빠짐, GitHub `{error}` → 400, GitHub에 못 닿음 → 502, 다른 경로 404.
+- `tests/js/auth-worker.test.js`: `auth/worker.js`를 Node의 `Request`/`Response`와 가짜 `fetch`로 돌린다. 출처가 다르면 403, 사전 요청, 잘못된 본문 400, GitHub에 넘기는 값(client_secret 포함), 성공 시 `refresh_token`이 빠짐, GitHub `{error}` → 400 (GitHub의 HTTP 상태와 상관없이), GitHub에 못 닿음·JSON 아님 → 502, 다른 경로 404.
 - `tests/js/config.test.js`: 시험 모드에서 `authorize`·`exchange`가 가짜 서버로 바뀜, 다른 주소에서는 안 바뀜.
 - Python: 가짜 GitHub의 authorize·token·`/_fake/login` 동작.
 - 브라우저 점검: 가짜 GitHub + `serve.py`로 버튼 → 관리 화면, 새로고침하면 자동 로그인, 로그아웃하면 버튼, `deny`·`down`·`reader` 각각의 메시지, 자동 로그인 실패 뒤 되풀이 없음.
@@ -175,7 +175,8 @@
   - "관리 페이지를 컴퓨터에서만 시험하기": 토큰·잠금 비밀번호 대신 "GitHub로 로그인"을 누르면 가짜 서버가 바로 들여보낸다.
   - "토큰 만들기" → 두 갈래: **관리 페이지 로그인 준비**(GitHub App 만들기, Worker 올리기, 값 넣는 곳)와 **PC 도우미 토큰**(지금 내용 중 PC 부분).
   - "문제가 생기면": 로그인이 안 될 때 (Worker가 응답하는지, App이 `nocturne`에 설치됐는지, client secret을 새로 만들었으면 Worker에도 바꿔 넣기, 폰 브라우저가 github.com에 로그인돼 있는지). 관리 페이지의 "토큰이 만료되면" 항목은 PC 도우미만 남긴다.
-  - "알아둘 것": 관리 페이지 토큰은 저장하지 않고 8시간짜리라는 것, `hpotty36.github.io` 출처 이야기는 이제 Worker CORS와 `nocturne.signedIn`에만 해당.
+  - "알아둘 것": 관리 페이지 토큰은 저장하지 않고 8시간짜리라는 것. `hpotty36.github.io` 출처 이야기: 이 계정의 모든 Pages 사이트가 같은 출처라, 그중 어느 페이지에서 도는 스크립트든 혼자서 로그인을 끝낼 수 있다 (자기 PKCE 값으로 로그인 주소를 팝업으로 열고, 같은 출처인 팝업에서 `?code=`를 읽고, 출처만 보는 Worker에서 토큰으로 바꾼다). 주인이 GitHub에 로그인돼 있고 App을 허용했으면 아무것도 묻지 않는다. 토큰을 저장하지 않아도 막지 못한다. `nocturne.signedIn`도 보인다.
+  - "지켜야 할 것": 사이트와 관리 페이지는 외부 스크립트를 불러오지 않고, 이 계정의 다른 Pages 사이트에도 믿을 수 없는 내용이나 스크립트를 두지 않는다. 바꿔야 한다면 먼저 관리 페이지를 관리 페이지만 쓰는 출처로 옮긴다.
 - README의 관리 페이지 설명.
 
 ## 7. 내보내는 순서

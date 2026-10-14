@@ -65,6 +65,8 @@ py tests\browser\serve.py --port 8000
 
 `http://localhost:8000/admin/?api=http://127.0.0.1:8790` 을 열고 **GitHub로 로그인**을 누르면 가짜 서버가 바로 들여보낸다 (토큰을 넣지 않는다). 그다음부터는 열기만 해도 저절로 로그인된다. `?api=`는 관리 페이지를 `localhost`나 `127.0.0.1`에서 열었을 때만 먹고, 주소는 `http://127.0.0.1:<포트>` 꼴이어야 한다 (`localhost:<포트>` 등 다른 주소는 무시하고 진짜 GitHub에 붙는다). 올린 사진을 가짜 AI(제목 "초안")로 게시해 보려면 `py tests\browser\run_worker.py http://127.0.0.1:8790 --by pc` (또는 `--by github`).
 
+로컬 미리보기에서 사이트 바닥글의 "관리"를 누르면 `?api=` 없는 `admin/`이 열려 진짜 GitHub에 붙는다. 시험할 때는 위 `?api=` 주소를 바로 연다.
+
 로그인 실패는 가짜 서버의 로그인 방식을 바꿔 보고, 버튼을 다시 누른다 (Git Bash나 cmd).
 
 ```
@@ -180,6 +182,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 - `alt`는 화면 낭독기용 설명이다. 무엇이 찍혔는지 한 문장으로, 흑백이면 끝에 "흑백 사진"을 덧붙인다.
 - 문구는 한국어, 짧고 평이하게.
 - 사람이 고친 제목·설명과 방 배정은 AI가 다시 바꾸지 않는다.
+- 사이트와 관리 페이지는 외부 스크립트를 불러오지 않는다. 이 계정의 다른 Pages 사이트에도 믿을 수 없는 내용이나 스크립트를 두지 않는다. 같은 출처라서 거기서 도는 스크립트가 관리 페이지 로그인을 몰래 끝낼 수 있다 (알아둘 것). 이걸 바꿔야 한다면 먼저 관리 페이지를 관리 페이지만 쓰는 출처로 옮긴다.
 
 ## 디자인 메모
 
@@ -208,7 +211,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 - 저장소: https://github.com/HPotty36/nocturne (공개)
 - 사이트: https://hpotty36.github.io/nocturne/
 - 관리 페이지: https://hpotty36.github.io/nocturne/admin/
-- GitHub Pages는 Actions로 배포한다 (`build_type=workflow`). `main`에 `src/**`, `photos/**`, `admin/**`, `scripts/build.py`, `scripts/photolib.py`, `requirements.txt`가 바뀌어 push되면 `site.yml`이 `build.py --out _site`로 `index.html`, `photos/`, `admin/`만 올린다 (1~2분). 문서만 바뀐 push는 다시 만들지 않는다. 수동 실행은 `gh workflow run site.yml`. `queue/`, `src/`, `scripts/`, `tests/`는 사이트로 서빙되지 않는다.
+- GitHub Pages는 Actions로 배포한다 (`build_type=workflow`). `main`에 `src/**`, `photos/**`, `admin/**`, `scripts/build.py`, `scripts/photolib.py`, `requirements.txt`가 바뀌어 push되면 `site.yml`이 `build.py --out _site`로 `index.html`, `photos/`, `admin/`만 올린다 (1~2분). 문서만 바뀐 push는 다시 만들지 않는다. 수동 실행은 `gh workflow run site.yml`. `queue/`, `src/`, `scripts/`, `tests/`, `auth/`는 사이트로 서빙되지 않는다 (`auth/worker.js`는 Cloudflare에 손으로 붙여 넣는다).
 - `.nojekyll`은 Actions 배포에서는 필요 없지만 두어도 해롭지 않다.
 - 저장소 이름을 `across-gallery`에서 `nocturne`으로 바꿨기 때문에 옛 주소(`hpotty36.github.io/across-gallery/`)는 열리지 않는다. 이동 안내는 두지 않았다.
 
@@ -224,7 +227,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
     curl -s -o /dev/null -w "%{http_code}\n" -X POST https://nocturne-auth.<하위주소>.workers.dev/token -H "Origin: https://evil.example"
     ```
 
-    사이트 출처로 엉터리 코드를 보내면 `{"error":"bad_verification_code"}`가 정상이다. `incorrect_client_credentials`면 `CLIENT_ID`나 `CLIENT_SECRET`이 틀렸고, `not_configured`면 변수가 빠졌고, `github_unreachable`이면 Worker가 GitHub에 닿지 못한 것이다.
+    사이트 출처로 엉터리 코드를 보내면 `{"error":"bad_verification_code"}`가 정상이다. `{"error":"Not Found"}`면 `CLIENT_ID`가 틀렸다 (숫자로 된 App ID가 아니라 `Iv23…`으로 시작하는 Client ID를 넣는다). `incorrect_client_credentials`면 `CLIENT_SECRET`(또는 `CLIENT_ID`)이 틀렸고, `not_configured`면 변수가 빠졌고, `github_unreachable`이면 Worker가 GitHub에 닿지 못한 것이다.
 
     ```
     curl -s -X POST https://nocturne-auth.<하위주소>.workers.dev/token -H "Origin: https://hpotty36.github.io" -H "Content-Type: application/json" -d "{\"code\":\"x\",\"code_verifier\":\"y\",\"redirect_uri\":\"https://hpotty36.github.io/nocturne/admin/\"}"
@@ -234,6 +237,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
   - App의 client secret을 새로 만들었다면 Worker의 `CLIENT_SECRET`도 바꿔 넣는다.
   - 폰에서만 안 되면 그 폰 브라우저가 github.com에 로그인돼 있는지 본다.
   - 저절로 로그인하다 실패한 탭은 다시 저절로 하지 않는다. 고친 뒤 **GitHub로 로그인**을 누른다.
+- **배포 바로 뒤 관리 페이지가 "불러오는 중…"에서 멈추면**: GitHub Pages는 배포 뒤 최대 10분 동안 옛 관리 페이지 파일을 캐시에서 내줄 수 있다 (새 파일과 옛 파일이 섞인다). 새로고침하거나 10분 기다린 뒤 다시 연다.
 - **PC 도우미 토큰이 만료되면**: 도우미는 아무것도 하지 못하고 `helper.log`에 `오류 GitHubError: GitHub 401: Bad credentials`가 남는다. 새 토큰을 만들어(위 PC 도우미 토큰) `py scripts\pc_helper.py --setup`으로 저장하고 도우미를 다시 켠다.
 - **"확인할 수 없는 항목"**: `queue/<name>/`에 `item.json`이 없거나 읽을 수 없는 폴더다 (망가진 업로드, 손으로 만든 폴더). AI는 이것을 건너뛰고 기록(`helper.log`, Actions)에 한 번 적는다. 관리 페이지에서 **버리기**로 지운다.
 - **"AI 대기"가 오래 가면**: 아무도 맡지 않은 것이다. 올린 지 15분이 넘으면 카드에 "AI가 오래 걸리고 있어요"가 붙는다. 대개 PC 도우미나 Ollama가 꺼져 있고 Draft도 돌지 못한 경우다. Actions 탭에서 Draft가 꺼져 있거나 실패하지 않았는지 본다 (저장소에 60일 동안 활동이 없으면 GitHub가 30분마다 도는 `schedule`을 멈춘다). 바로 돌리려면 Actions 탭의 **Run workflow** 또는 `gh workflow run draft.yml`. PC에서 Ollama와 도우미를 켜도 된다. 필요 없는 사진이면 버린다.
@@ -248,4 +252,4 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 - AI 제목은 40자, 설명은 200자에서 자른다 (낱말 경계에서). 흑백 표시는 자른 뒤에 붙는다.
 - 모델: PC `gemma4:12b-it-qat` (기본), Actions `gemma4:e4b-it-qat` (환경변수 `NOCTURNE_MODEL`). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.
 - 관리 페이지의 토큰은 로그인으로 받는 8시간짜리 `ghu_…` 토큰이고, 열린 페이지의 메모리에만 있다. localStorage·sessionStorage·쿠키·주소·기록 어디에도 쓰지 않는다. 브라우저에 남는 것은 localStorage `nocturne.signedIn`("이 기기에서 로그인한 적 있음", 비밀 아님)과, 로그인하러 다녀오는 동안의 sessionStorage `nocturne.login`(위조 방지 값과 PKCE 원문, 돌아오자마자 지움)·`nocturne.auto`(이 탭에서 저절로 로그인을 이미 해 봄)뿐이다. 옛 방식의 `nocturne.token`은 페이지를 열 때 지운다.
-- 관리 페이지는 `hpotty36.github.io` 출처에서 돈다. 이 계정의 모든 Pages 사이트가 같은 출처라서 그 사이트들도 `nocturne.signedIn`을 볼 수 있고, Worker의 CORS(출처만 본다)를 통과한다. 토큰은 저장하지 않으니 그 밖에 나눠 갖는 것은 없다.
+- 관리 페이지는 `hpotty36.github.io` 출처에서 돈다. 이 계정의 모든 Pages 사이트가 같은 출처라서, 그중 어느 페이지에서 도는 스크립트든 혼자서 로그인을 끝낼 수 있다: 자기 PKCE 값으로 로그인 주소를 팝업으로 열고, 같은 출처인 팝업에서 `?code=`를 읽고, Worker에서 토큰으로 바꾼다 (Worker는 출처만 보니 통과한다). 그 기기 브라우저가 GitHub에 로그인돼 있고 App을 허용한 적이 있으면 아무것도 묻지 않는다. 토큰을 저장하지 않아도 이건 막지 못한다. 그래서 이 출처에는 믿을 수 있는 스크립트만 둔다 (지켜야 할 것). `nocturne.signedIn`도 그 사이트들이 볼 수 있다.
