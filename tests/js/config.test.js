@@ -6,7 +6,26 @@ const at = (href) => new URL(href); // hostname and search, as window.location h
 const withApi = (page, api) => resolveConfig(at(`${page}?api=${encodeURIComponent(api)}`)).api;
 
 test('CONFIG values', () => {
-  assert.deepEqual({ ...CONFIG }, { repo: 'HPotty36/nocturne', siteWorkflow: 'site.yml', api: 'https://api.github.com', pollMs: 15000 });
+  assert.deepEqual({ ...CONFIG }, {
+    repo: 'HPotty36/nocturne',
+    siteWorkflow: 'site.yml',
+    api: 'https://api.github.com',
+    pollMs: 15000,
+    clientId: 'Iv23-not-set',
+    authorize: 'https://github.com/login/oauth/authorize',
+    exchange: 'https://nocturne-auth.invalid/token',
+  });
+});
+
+test('test mode points the login at the fake', () => {
+  const config = resolveConfig(at('http://localhost:8000/admin/?api=http://127.0.0.1:8790'));
+  assert.equal(config.authorize, 'http://127.0.0.1:8790/login/oauth/authorize');
+  assert.equal(config.exchange, 'http://127.0.0.1:8790/_auth/token');
+  for (const href of ['https://hpotty36.github.io/nocturne/admin/?api=http://127.0.0.1:8790', 'http://localhost:8000/admin/?api=http://localhost:8790']) {
+    const other = resolveConfig(at(href));
+    assert.equal(other.authorize, CONFIG.authorize, href);
+    assert.equal(other.exchange, CONFIG.exchange, href);
+  }
 });
 
 test('the published page always talks to api.github.com', () => {

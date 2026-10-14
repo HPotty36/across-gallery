@@ -1,4 +1,5 @@
-// Where the admin page works: the repository, the site workflow, the GitHub API, and how often it looks again.
+// Where the admin page works: the repository, the site workflow, the GitHub API, how often it looks again, and where
+// "GitHub로 로그인" goes.
 // DOM-free ES module.
 
 export const CONFIG = Object.freeze({
@@ -6,6 +7,9 @@ export const CONFIG = Object.freeze({
   siteWorkflow: 'site.yml',
   api: 'https://api.github.com',
   pollMs: 15000,
+  clientId: 'Iv23-not-set', // the GitHub App's client ID (public); set at rollout
+  authorize: 'https://github.com/login/oauth/authorize',
+  exchange: 'https://nocturne-auth.invalid/token', // the Worker that trades a login code for a token; set at rollout
 });
 
 /**
@@ -30,12 +34,18 @@ function localApi(text) {
 
 /**
  * A copy of CONFIG for the page at `location` (window.location, or a URL). Only a page opened on this computer
- * (localhost / 127.0.0.1) may point the API at a local fake GitHub with `?api=http://127.0.0.1:<port>`; anywhere
- * else, and for any other address, `?api=` is ignored, so a link can never send the token somewhere else.
+ * (localhost / 127.0.0.1) may point the API at a local fake GitHub with `?api=http://127.0.0.1:<port>`, and then the
+ * login (authorize page and code exchange) goes to the same fake; anywhere else, and for any other address, `?api=`
+ * is ignored, so a link can never send the token or a login code somewhere else.
  */
 export function resolveConfig(location) {
   const config = { ...CONFIG };
   const api = new URLSearchParams(location.search).get('api');
-  if (LOCAL_PAGES.includes(location.hostname) && api) config.api = localApi(api) ?? config.api;
+  const local = LOCAL_PAGES.includes(location.hostname) && api ? localApi(api) : null;
+  if (local) {
+    config.api = local;
+    config.authorize = `${local}/login/oauth/authorize`;
+    config.exchange = `${local}/_auth/token`;
+  }
   return config;
 }
