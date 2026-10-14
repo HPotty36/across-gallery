@@ -112,7 +112,7 @@ test('canPush is true for a repository the token can write to', async () => {
   const repo = await repoWith({ 'a.txt': 'a' });
   assert.equal(await client().canPush(repo), true);
   assert.equal(await client().canPush('o/does-not-exist'), false);
-  await assert.rejects(new GitHub({ token: 'wrong', api: base }).canPush(repo), (e) => e instanceof AuthError && e.message === '토큰을 다시 넣어 주세요' && e.status === 401);
+  await assert.rejects(new GitHub({ token: 'wrong', api: base }).canPush(repo), (e) => e instanceof AuthError && e.message === '로그인이 끝났어요. 다시 로그인해 주세요' && e.status === 401);
 });
 
 test('commitFiles adds a file, copies a blob by its sha and deletes a file, in one commit', async () => {

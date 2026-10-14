@@ -20,7 +20,7 @@ const PATCH_REF = `${P}/git/refs/heads/main`;
 const sha = (ch) => ch.repeat(40);
 const [HEAD1, HEAD2, TREE1, TREE2, NEW_TREE, NEW1, NEW2] = ['1', '2', 'a', 'b', 'c', 'e', 'f'].map(sha);
 const CONFLICT = '다른 곳에서 동시에 바뀌었어요. 새로고침 후 다시 해 주세요';
-const AUTH = '토큰을 다시 넣어 주세요';
+const AUTH = '로그인이 끝났어요. 다시 로그인해 주세요';
 const OFFLINE = '인터넷 연결을 확인해 주세요';
 
 const reply = ({ status = 200, json, body = '' }) => new Response(json !== undefined ? JSON.stringify(json) : body, { status });

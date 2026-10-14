@@ -184,3 +184,12 @@ export function bootAction({ returned, signedIn, autoTried }) {
 export function needsLogin(expiresAt, now) {
   return expiresAt - now <= RENEW_BEFORE_MS;
 }
+
+/**
+ * What to say when GitHub turns the token down while the page works: 401, the login has ended; 403, the login worked
+ * but this account may not write here (usually the app is not installed on the repository), so logging in again
+ * would not help.
+ */
+export function rejectedMessage(status) {
+  return status === 401 ? MESSAGES.expired : MESSAGES.notAllowed;
+}

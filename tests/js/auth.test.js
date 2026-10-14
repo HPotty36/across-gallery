@@ -4,7 +4,7 @@ import { CONFIG, resolveConfig } from '../../admin/config.js';
 import {
   LOGIN_KEY, AUTO_KEY, SIGNED_IN_KEY, OLD_TOKEN_KEY, LOGIN_MAX_AGE_MS, DEFAULT_LIFETIME_S, RENEW_BEFORE_MS, MESSAGES,
   LoginError, base64url, challengeFor, newLogin, saveLogin, takeLogin, remember, recall, forget, redirectUri,
-  authorizeUrl, readReturn, checkReturn, exchange, bootAction, needsLogin,
+  authorizeUrl, readReturn, checkReturn, exchange, bootAction, needsLogin, rejectedMessage,
 } from '../../admin/lib/auth.js';
 
 const at = (href) => new URL(href);
@@ -254,4 +254,9 @@ test('renewal window', () => {
   assert.equal(needsLogin(10_000_000, 10_000_000 - 900_001), false);
   assert.equal(needsLogin(10_000_000, 10_000_000 - 900_000), true);
   assert.equal(needsLogin(10_000_000, 10_000_001), true);
+});
+
+test('why GitHub said no', () => {
+  assert.equal(rejectedMessage(401), MESSAGES.expired);
+  assert.equal(rejectedMessage(403), MESSAGES.notAllowed);
 });

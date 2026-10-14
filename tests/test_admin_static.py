@@ -1,4 +1,6 @@
+import re
 import unittest
+from urllib.parse import urlsplit
 
 import helpers
 
@@ -12,14 +14,30 @@ class AdminStaticTests(unittest.TestCase):
                 self.assertNotIn(bad, t, f"{p.name}: {bad}")
     def test_csp_and_no_inline(self):
         t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("connect-src https://api.github.com http://127.0.0.1:*;", t)
+        config = (helpers.ROOT / "admin" / "config.js").read_text(encoding="utf-8")
+        exchange = urlsplit(re.search(r"exchange: '([^']+)'", config).group(1))
+        origin = f"{exchange.scheme}://{exchange.netloc}"  # the Worker: the CSP and config.js never drift apart
+        self.assertIn(f"connect-src https://api.github.com {origin} http://127.0.0.1:*;", t)
         self.assertIn("script-src 'self';", t)
         self.assertNotRegex(t, r"<script(?![^>]*\bsrc=)")
         self.assertNotIn(" style=", t)
+    def test_no_stored_token(self):
+        self.assertFalse((helpers.ROOT / "admin" / "lib" / "vault.js").exists())
+        texts = {p: p.read_text(encoding="utf-8") for p in js_files()}
+        for p, t in texts.items():
+            self.assertNotIn("seal(", t, p.name)
+        # the old sealed token's key: only the constant that removes it on boot
+        self.assertEqual(sum(t.count("nocturne.token") for t in texts.values()), 1)
+        self.assertIn("'nocturne.token'", texts[helpers.ROOT / "admin" / "lib" / "auth.js"])
+    def test_site_link_opens_a_new_tab(self):
+        t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<a class="mark" href="../" target="_blank" rel="noopener">Nocturne</a>', t)
     def test_tokens_match_site(self):
         self.assertEqual(helpers.theme_tokens(helpers.ROOT / "admin" / "admin.css"),
                          helpers.theme_tokens(helpers.ROOT / "src" / "template.html"))
-    LABELS = ["새 사진", "전시 중", "잠금 비밀번호", "토큰을 다시 넣어 주세요", "로그아웃", "대표로 지정", "AI로 다시 쓰기",
+    LABELS = ["새 사진", "전시 중", "GitHub로 로그인", "로그인하는 중…", "로그인을 취소했어요",
+              "로그인하지 못했어요. 잠시 뒤 다시 해 주세요", "이 GitHub 계정으로는 관리할 수 없어요",
+              "로그인이 끝났어요. 다시 로그인해 주세요", "로그아웃했어요", "로그아웃", "대표로 지정", "AI로 다시 쓰기",
               "AI가 다시 쓰는 중…", "이미 게시한 사진은 GitHub 기록에 남습니다",
               "대표 사진은 다른 사진을 대표로 지정한 뒤 지울 수 있어요", "사이트 반영 중…", "반영됨", "반영 실패",
               "올리는 중…", "올리지 못했어요", "다시 올리기", "AI 대기", "PC AI가 보는 중…", "GitHub AI가 보는 중… (몇 분)",

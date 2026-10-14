@@ -118,7 +118,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   letter-spacing: 0.04em;
   color: var(--ink-dim);
 }
-.hint { margin: 0; font-size: 12px; color: var(--ink-dim); }
 input, select, textarea {
   width: 100%;
   min-height: 44px;
@@ -133,7 +132,6 @@ input, select, textarea {
   transition: border-color 0.15s ease;
 }
 textarea { display: block; resize: vertical; }
-.token-field { resize: none; word-break: break-all; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 14px; }
 input:hover, select:hover, textarea:hover { border-color: var(--ink-dim); }
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: 1px; }
 
@@ -161,21 +159,12 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
 .btn-main:hover, .btn-main[aria-disabled="true"]:hover { border-color: var(--ink); }
 .btn-quiet { border-color: transparent; color: var(--ink-dim); }
 .btn-quiet:hover { border-color: transparent; color: var(--ink); }
-.btn-link {
-  min-height: 0;
-  padding: 2px 0;
-  border: 0;
-  color: var(--ink-dim);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.btn-link:hover { color: var(--ink); }
 
 /* status and error lines; an empty one has no height but stays in place, so screen readers hear what comes */
 .msg { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink-dim); }
 .msg.is-error { padding-left: 10px; border-left: 2px solid var(--ink); color: var(--ink); }
 
-/* ---------- setup and unlock ---------- */
+/* ---------- login ---------- */
 .gate { max-width: 420px; }
 .gate-title {
   margin: 0 0 8px;
@@ -185,10 +174,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   line-height: 1.3;
 }
 .gate-note { margin: 0 0 28px; font-size: 14px; line-height: 1.7; color: var(--ink-dim); text-wrap: pretty; }
-.gate-form { display: grid; gap: 18px; margin-top: 24px; }
-.gate-note + .gate-form { margin-top: 0; }
-.gate-form .btn-main { justify-self: start; min-width: 8rem; }
-.gate-alt { margin: 32px 0 0; font-size: 13px; }
+.gate .btn-main { min-width: 8rem; }
+.gate .msg { margin-top: 16px; }
 
 /* ---------- site status, tabs ---------- */
 .site-status {
@@ -396,7 +383,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offs
   .row-actions .btn { flex: 1 1 calc(50% - 4px); }
   .row-actions .btn-delete, .row-actions .cover-note { margin-left: 0; }
   .cover-note { flex: 1 1 100%; max-width: none; }
-  .gate-form .btn-main { justify-self: stretch; }
+  .gate .btn-main { width: 100%; }
   .q-drop { padding: 16px; }
   .q-drop .btn-main { flex: 1 1 100%; }
   /* the thumbnail beside the text only; buttons, message and form use the whole width */

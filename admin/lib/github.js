@@ -18,7 +18,7 @@ const JSON_ACCEPT = 'application/vnd.github+json';
 const RAW_ACCEPT = 'application/vnd.github.raw';
 const CHUNK = 0x3000; // bytes per btoa call; a multiple of 3, so the pieces join without padding
 
-const AUTH_MESSAGE = '토큰을 다시 넣어 주세요';
+const AUTH_MESSAGE = '로그인이 끝났어요. 다시 로그인해 주세요';
 const OFFLINE_MESSAGE = '인터넷 연결을 확인해 주세요';
 const CONFLICT_MESSAGE = '다른 곳에서 동시에 바뀌었어요. 새로고침 후 다시 해 주세요';
 const RATE_LIMIT_MESSAGE = '요청이 너무 많아요. 잠시 후 다시 해 주세요';

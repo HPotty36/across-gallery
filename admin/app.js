@@ -1,29 +1,29 @@
-// The admin page shell: first-time setup or unlock, the tabs, the site build status, logout.
+// The admin page shell: "GitHub로 로그인", the tabs, the site build status, logout.
 //
-// The GitHub token is kept on this device only sealed with the lock passphrase (localStorage["nocturne.token"]).
-// After unlock the plain token lives only inside `client` (a GitHub object, in a private field) until logout or
-// until GitHub turns it down; it is never written anywhere else, never logged, never put in a URL.
+// Logging in (every decision is in lib/auth.js): the button sends the person to GitHub, GitHub sends them back here
+// with a code, and the Worker at config.exchange trades the code for a token. The token lives only inside `client` (a
+// GitHub object, in a private field) until logout, until it runs out, or until GitHub turns it down; it is never
+// written to storage, never logged, never put in a URL. Storage holds only the login on its way to GitHub and back
+// (sessionStorage) and two flags: this browser has logged in before (localStorage), and this tab already went to
+// GitHub on its own once (sessionStorage), so a failed login shows the button instead of going round again.
 // Views get ctx = {gh, config, refreshStatus, reloadExhibit}:
-//   gh             the GitHub client's methods; a rejected token anywhere sends the page back to setup
-//   config         resolveConfig(location): repo, siteWorkflow, api, pollMs
+//   gh             the GitHub client's methods; a rejected token anywhere sends the page back to the login screen
+//   config         resolveConfig(location): repo, siteWorkflow, api, pollMs, and where the login goes
 //   refreshStatus  refreshStatus(changed = false): read the site build status again; `changed` after a commit
 //                  that changes the site, so the previous build does not pass for the new one
 //   reloadExhibit  reloadExhibit({forget} = {}): read photos.json again and bring the "전시 중" tab up to date;
 //                  `forget` names files whose redraft was thrown away in the queue
 
 import { resolveConfig } from './config.js';
+import {
+  AUTO_KEY, MESSAGES, OLD_TOKEN_KEY, SIGNED_IN_KEY, LoginError, authorizeUrl, bootAction, challengeFor, checkReturn,
+  exchange, forget, needsLogin, newLogin, readReturn, recall, redirectUri, rejectedMessage, remember, saveLogin, takeLogin,
+} from './lib/auth.js';
 import { AuthError, GitHub, GitHubError } from './lib/github.js';
 import { SiteStatus } from './lib/sitestatus.js';
-import { seal, unseal, VaultError } from './lib/vault.js';
 import { renderExhibit } from './views/exhibit.js';
 import { addFiles, closeQueue, renderQueue } from './views/queue.js';
 
-const STORE_KEY = 'nocturne.token';
-
-const TOKEN_AGAIN = '토큰을 다시 넣어 주세요';
-const NO_STORAGE = '이 브라우저에서는 저장할 수 없어요';
-const VAULT_FAILED = '잠금을 풀 수 없어요. 다시 시도해 주세요';
-const MISMATCH = '두 잠금 비밀번호가 같지 않아요';
 const SITE_TEXT = { busy: '사이트 반영 중…', done: '반영됨', failed: '반영 실패' };
 
 const config = resolveConfig(window.location);
@@ -34,45 +34,23 @@ function say(node, text, isError = false) {
   node.classList.toggle('is-error', Boolean(text) && isError);
 }
 
-// --- the sealed token on this device ---------------------------------------------------------
-
-/** The sealed token: an object, null when there is none (or it is damaged), undefined when storage cannot be used. */
-function readSeal() {
-  let text;
+/** window.localStorage or window.sessionStorage; null where merely reading it throws (site data blocked). */
+function storage(name) {
   try {
-    text = window.localStorage.getItem(STORE_KEY);
-  } catch {
-    return undefined; // storage switched off, or a private window that refuses it
-  }
-  if (text === null) return null;
-  try {
-    const sealed = JSON.parse(text);
-    return sealed !== null && typeof sealed === 'object' ? sealed : null;
+    return window[name];
   } catch {
     return null;
   }
 }
 
-function writeSeal(sealed) {
-  try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(sealed));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function forgetSeal() {
-  try {
-    window.localStorage.removeItem(STORE_KEY);
-  } catch {
-    // nothing could have been stored either
-  }
-}
+// lib/auth.js treats null like a storage that refuses everything
+const local = storage('localStorage');
+const session = storage('sessionStorage');
 
 // --- the GitHub client -----------------------------------------------------------------------
 
-let client = null; // the GitHub client while unlocked; it alone holds the token
+let client = null; // the GitHub client while logged in; it alone holds the token
+let expiresAt = 0; // when its token ends (ms)
 
 async function call(method, args) {
   const mine = client;
@@ -80,7 +58,7 @@ async function call(method, args) {
   try {
     return await mine[method](...args);
   } catch (error) {
-    if (error instanceof AuthError && client === mine) tokenRejected();
+    if (error instanceof AuthError && client === mine) tokenRejected(error.status);
     throw error;
   }
 }
@@ -95,34 +73,21 @@ const ctx = Object.freeze({
   reloadExhibit: (options) => renderExhibit($('panel-exhibit'), ctx, options),
 });
 
-/** A client for `token` if it may write to the repository; AuthError if not, GitHubError if GitHub cannot be reached. */
-async function checkedClient(token) {
-  const candidate = new GitHub({ token, api: config.api }); // AuthError for a token that cannot be one
-  if (!(await candidate.canPush(config.repo))) throw new AuthError(403);
-  return candidate;
-}
-
 // --- screens ---------------------------------------------------------------------------------
 
 function show(screen) {
   $('boot').hidden = true;
-  for (const name of ['setup', 'unlock', 'desk']) $(name).hidden = name !== screen;
+  for (const name of ['login', 'desk']) $(name).hidden = name !== screen;
   $('logout').hidden = screen !== 'desk';
-  if (screen !== 'unlock') $('unlock-pass').value = ''; // a typed passphrase never waits on a hidden screen
 }
 
-function openSetup(message = '', isError = false) {
-  for (const id of ['setup-token', 'setup-pass', 'setup-pass2']) $(id).value = '';
-  show('setup');
-  say($('setup-msg'), message, isError);
-  $('setup-token').focus();
-}
-
-function openUnlock() {
-  $('unlock-pass').value = '';
-  show('unlock');
-  say($('unlock-msg'), '');
-  $('unlock-pass').focus();
+/** The login screen saying `message`, its button ready and focused. */
+function openLogin(message = '', isError = false) {
+  show('login');
+  say($('login-msg'), message, isError);
+  const button = $('login-start');
+  button.removeAttribute('aria-disabled');
+  button.focus();
 }
 
 function enter(github) {
@@ -147,103 +112,86 @@ function lock() {
   $('panel-exhibit').replaceChildren();
 }
 
-/** GitHub turned the token down: back to setup. The sealed token stays until a new one is saved. */
-function tokenRejected() {
+/** GitHub turned the token down while the page worked: back to the login screen, saying why (see rejectedMessage). */
+function tokenRejected(status) {
   lock();
-  openSetup(TOKEN_AGAIN, true);
+  openLogin(rejectedMessage(status), true);
 }
 
-/** While a form works, it ignores another submit; aria-disabled keeps the focus where it was. */
-function busy(form, on) {
-  form.setAttribute('aria-busy', String(on));
-  form.querySelector('[type="submit"]').setAttribute('aria-disabled', String(on));
-}
+// --- logging in ------------------------------------------------------------------------------
 
-// first time (or a new token): check the token, seal it, keep only the sealed copy
-$('setup-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  if (form.getAttribute('aria-busy') === 'true') return;
-  const msg = $('setup-msg');
-  const token = $('setup-token').value.trim();
-  const pass = $('setup-pass').value;
-  if (pass.normalize('NFC') !== $('setup-pass2').value.normalize('NFC')) {
-    say(msg, MISMATCH, true);
+/**
+ * Off to GitHub. The button stays aria-disabled (clicks ignored, focus kept) until the page is left; the login in
+ * progress waits in sessionStorage for the way back.
+ */
+async function startLogin() {
+  const button = $('login-start');
+  if (button.getAttribute('aria-disabled') === 'true') return;
+  button.setAttribute('aria-disabled', 'true');
+  const login = newLogin(Date.now());
+  if (!saveLogin(session, login)) {
+    openLogin(MESSAGES.noStorage, true);
     return;
   }
-  if (readSeal() === undefined) {
-    say(msg, NO_STORAGE, true);
-    return;
-  }
-  busy(form, true);
-  say(msg, '확인하는 중…');
   try {
-    const sealed = await seal(token, pass); // VaultError: no token, passphrase too short
-    const github = await checkedClient(token);
-    if (!writeSeal(sealed)) {
-      say(msg, NO_STORAGE, true);
+    const challenge = await challengeFor(login.verifier);
+    window.location.assign(authorizeUrl(config, { state: login.state, challenge, redirect: redirectUri(window.location, config) }));
+  } catch {
+    openLogin(MESSAGES.failed, true); // no WebCrypto here: the button must not stay dead
+  }
+}
+
+/**
+ * Back from GitHub with `got` (readReturn): take the code out of the address, check that it belongs to the login this
+ * tab started, trade it for a token and make sure the account may write to the repository. A failure leaves
+ * sessionStorage[AUTO_KEY] in place, so a reload shows the button instead of going to GitHub again.
+ */
+async function finishLogin(got) {
+  const redirect = redirectUri(window.location, config);
+  window.history.replaceState(null, '', redirect);
+  const checked = checkReturn(takeLogin(session), got, Date.now());
+  if (checked.message) {
+    openLogin(checked.message, true);
+    return;
+  }
+  say($('boot'), MESSAGES.starting);
+  try {
+    const answer = await exchange(config, { code: checked.code, verifier: checked.verifier, redirect });
+    const github = new GitHub({ token: answer.token, api: config.api });
+    if (!(await github.canPush(config.repo))) {
+      openLogin(MESSAGES.notAllowed, true); // the token goes with `github`
       return;
     }
-    for (const id of ['setup-token', 'setup-pass', 'setup-pass2']) $(id).value = ''; // the token leaves the page at once
-    say(msg, '');
+    remember(local, SIGNED_IN_KEY, '1');
+    forget(session, AUTO_KEY);
+    expiresAt = answer.expiresAt;
     enter(github);
   } catch (error) {
-    if (error instanceof VaultError || error instanceof GitHubError) say(msg, error.message, true);
-    else say(msg, VAULT_FAILED, true);
-  } finally {
-    busy(form, false);
+    // a token GitHub refuses at once is a failed login, not an ended one; other GitHub errors say what went wrong
+    const told = error instanceof LoginError || (error instanceof GitHubError && !(error instanceof AuthError));
+    openLogin(told ? error.message : MESSAGES.failed, true);
   }
+}
+
+$('login-start').addEventListener('click', () => startLogin());
+
+// back in this tab after a while: a token that has ended (or soon will) is let go before anything is typed
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !client || !needsLogin(expiresAt, Date.now())) return;
+  lock();
+  openLogin(MESSAGES.expired, true);
 });
 
-// later visits: the passphrase opens the sealed token
-$('unlock-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  if (form.getAttribute('aria-busy') === 'true') return;
-  const msg = $('unlock-msg');
-  const sealed = readSeal();
-  if (!sealed) {
-    openSetup(sealed === undefined ? NO_STORAGE : '', sealed === undefined);
-    return;
-  }
-  busy(form, true);
-  say(msg, '여는 중…');
-  try {
-    let github;
-    try {
-      github = await checkedClient(await unseal(sealed, $('unlock-pass').value));
-    } catch (error) {
-      if (error instanceof AuthError) {
-        tokenRejected();
-        return;
-      }
-      if (error instanceof VaultError || error instanceof GitHubError) say(msg, error.message, true);
-      else say(msg, VAULT_FAILED, true);
-      $('unlock-pass').focus();
-      $('unlock-pass').select();
-      return;
-    }
-    $('unlock-pass').value = '';
-    say(msg, '');
-    enter(github);
-  } finally {
-    busy(form, false);
-  }
+// Back from GitHub with the browser's back button: the page may come back exactly as it was left (the button
+// disabled, or "로그인하는 중…"). Offer the button again; never go to GitHub on its own from here.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && !client) openLogin();
 });
-
-// the token is a textarea (so no password manager offers to keep it): Enter sends the form instead of a line break
-$('setup-token').addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter' || event.isComposing) return;
-  event.preventDefault();
-  $('setup-form').requestSubmit();
-});
-
-$('unlock-reset').addEventListener('click', () => openSetup());
 
 $('logout').addEventListener('click', () => {
-  forgetSeal();
+  forget(local, SIGNED_IN_KEY);
   lock();
-  openSetup('로그아웃했어요');
+  openLogin(MESSAGES.loggedOut);
 });
 
 // --- tabs ------------------------------------------------------------------------------------
@@ -311,7 +259,20 @@ if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
   window.__nocturne = { addFiles: (files) => addFiles(files) };
 }
 
-const stored = readSeal();
-if (stored === undefined) openSetup(NO_STORAGE, true);
-else if (stored === null) openSetup();
-else openUnlock();
+forget(local, OLD_TOKEN_KEY); // the sealed token of the old paste-a-token login
+
+const got = readReturn(window.location);
+const action = bootAction({
+  returned: got !== null,
+  signedIn: recall(local, SIGNED_IN_KEY) === '1',
+  autoTried: recall(session, AUTO_KEY) === '1',
+});
+if (action === 'return') {
+  finishLogin(got);
+} else if (action === 'auto') {
+  remember(session, AUTO_KEY, '1'); // once per tab: after a failed login a reload shows the button
+  say($('boot'), MESSAGES.starting);
+  startLogin();
+} else {
+  openLogin();
+}
