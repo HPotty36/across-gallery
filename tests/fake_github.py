@@ -9,6 +9,12 @@ works here: the contents API (file and directory JSON, base64 content, git blob 
 git/commits, git/blobs, git/trees (base_tree, sha: null deletes), PATCH git/refs (422 unless fast-forward),
 and actions/workflows/{file}/runs.
 
+It also plays the admin page's login, which needs no token: GET /login/oauth/authorize is GitHub's login page
+(it asks nobody and sends the browser straight back with a code, or with access_denied) and POST /_auth/token is
+the code-exchange Worker (it answers {access_token, expires_in} when the PKCE verifier fits the code's challenge).
+PUT /_fake/login {mode, expires_in?} picks how login behaves: ok, deny, down (the Worker cannot reach GitHub) or
+reader (the account may not push to the repo).
+
 A repo is a set of git objects: blobs by sha, trees as {path: blob sha} snapshots, commits that point at a
 snapshot. `main` is the only branch. The fake is stricter than GitHub in a few places, so clients
 cannot lean on leniency: tree entries must be 100644 blobs given by sha, and deleting a path that is not
@@ -21,6 +27,7 @@ import hashlib
 import itertools
 import json
 import re
+import secrets
 import sys
 import threading
 import time
@@ -28,7 +35,7 @@ import traceback
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 SEED_REPO = "HPotty36/nocturne"
@@ -42,6 +49,9 @@ CORS = {
 _RAW_ACCEPT = re.compile(r"application/vnd\.github(\.v3)?\.raw")
 _FIRST_COMMIT_TIME = 1_760_000_000  # fake commit times count up from here, one second per commit
 _ACCOUNT = {"name": "Fake", "email": "fake@example.test"}  # who a commit is by when the request names nobody
+LOGIN_MODES = ("ok", "deny", "down", "reader")
+_LOGIN_LIFETIME = 28800  # seconds a login token lasts unless set_login says otherwise (GitHub App user tokens: 8 hours)
+_WEB_ADDRESS = re.compile(r"https?://[^\s#]+")
 
 
 # --- git hashing -------------------------------------------------------------------------------
@@ -122,6 +132,10 @@ class _HttpError(Exception):
         self.status, self.message = status, message
 
 
+class Redirect(str):
+    """The payload of a 302: the address for its Location header."""
+
+
 def _error_body(status, message):
     return {"message": message, "documentation_url": DOCS, "status": str(status)}
 
@@ -181,6 +195,9 @@ class FakeGitHub:
         self._repos = {}
         self._failures = []  # [method, path prefix, status, times left]
         self._runs = {}      # (repo, workflow file) -> run
+        self._login_mode = "ok"
+        self._expires_in = _LOGIN_LIFETIME
+        self._codes = {}     # login code handed out by the login page, not yet exchanged -> its PKCE challenge
         self._clock = itertools.count(_FIRST_COMMIT_TIME)
         self._lock = threading.RLock()
         self._server = None
@@ -261,6 +278,13 @@ class FakeGitHub:
         with self._lock:
             self._runs[(repo, workflow)] = run
 
+    def set_login(self, mode, expires_in=_LOGIN_LIFETIME):
+        """How login goes from now on (one of LOGIN_MODES; see the module docstring) and how long its tokens last."""
+        if mode not in LOGIN_MODES:
+            raise ValueError(f"login mode must be one of {', '.join(LOGIN_MODES)}, not {mode!r}")
+        with self._lock:
+            self._login_mode, self._expires_in = mode, expires_in
+
     # --- commits ---
 
     def _store_commit(self, state, tree, parents, message, author=None, committer=None):
@@ -299,12 +323,17 @@ class FakeGitHub:
 
     def handle(self, method, target, headers, body):
         """(status, payload) for one request, without a socket: `target` is the path with its query string, `headers`
-        a mapping, `body` bytes. The payload is a dict, a list, or bytes (a raw file). OPTIONS never gets here."""
+        a mapping, `body` bytes. The payload is a dict, a list, bytes (a raw file) or a Redirect (a 302 to that address).
+        OPTIONS never gets here."""
         url = urlsplit(target)
         path, query = unquote(url.path), parse_qs(url.query)
         try:
             if path.startswith("/_fake/"):
                 return self._control(method, path, body)
+            if (method, path) == ("GET", "/login/oauth/authorize"):  # login takes no token and is not logged
+                return self._authorize(query)
+            if (method, path) == ("POST", "/_auth/token"):
+                return self._token(body)
             if not path.startswith("/repos/"):
                 raise _HttpError(404, f"Not Found: the fake has no route for {method} {path}")
             with self._lock:
@@ -348,7 +377,7 @@ class FakeGitHub:
             raise _HttpError(404, "Not Found")
         if not rest and method == "GET":
             return 200, {"full_name": name, "default_branch": "main", "private": False,
-                         "permissions": {"push": True, "pull": True}}
+                         "permissions": {"push": self._login_mode != "reader", "pull": True}}
         if rest[:1] == ["contents"]:
             subpath = "/".join(rest[1:]).strip("/")
             if method == "GET":
@@ -361,6 +390,47 @@ class FakeGitHub:
             run = self._runs.get((name, rest[2]))
             return 200, {"total_count": 1 if run else 0, "workflow_runs": [run] if run else []}
         raise _HttpError(404, f"Not Found: the fake has no route for {method} {path}")
+
+    # --- login ---
+
+    def _authorize(self, query):
+        """GitHub's login page, minus the page: straight back to redirect_uri with a code (or access_denied) and the state."""
+        first = lambda name: (query.get(name) or [""])[0]
+        back = first("redirect_uri")
+        if not _WEB_ADDRESS.fullmatch(back):
+            raise _HttpError(400, "redirect_uri must be a web address")
+        if first("code_challenge_method") != "S256" or not first("code_challenge"):
+            raise _HttpError(400, "the fake takes only PKCE: code_challenge with code_challenge_method=S256")
+        answer = {}
+        with self._lock:
+            if self._login_mode == "deny":
+                answer["error"] = "access_denied"
+            else:
+                answer["code"] = secrets.token_urlsafe(16)
+                self._codes[answer["code"]] = first("code_challenge")
+        if first("state"):
+            answer["state"] = first("state")
+        return 302, Redirect(back + ("&" if "?" in back else "?") + urlencode(answer))
+
+    def _token(self, body):
+        """The code-exchange Worker: {code, code_verifier, redirect_uri} in, {access_token, expires_in} out. Its errors are
+        {"error": ...}, not GitHub's REST error bodies. A code is used up by its first try, right or wrong."""
+        try:
+            data = self._json(body)
+        except _HttpError:
+            data = {}
+        fields = [data.get(name) for name in ("code", "code_verifier", "redirect_uri")]
+        if not all(isinstance(field, str) and field for field in fields):
+            return 400, {"error": "bad_request"}
+        code, verifier, _ = fields
+        with self._lock:
+            challenge = self._codes.pop(code, None)
+            if self._login_mode == "down":
+                return 502, {"error": "github_unreachable"}
+            fits = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("utf-8")).digest()).rstrip(b"=").decode("ascii")
+            if challenge is None or challenge != fits:
+                return 400, {"error": "bad_verification_code"}
+            return 200, {"access_token": self.token, "expires_in": self._expires_in}
 
     # --- contents API ---
 
@@ -548,6 +618,8 @@ class FakeGitHub:
                 self.token = str(data["token"])
             elif (method, path) == ("PUT", "/_fake/run"):
                 self.set_run(data["repo"], data["workflow"], data["run"])
+            elif (method, path) == ("PUT", "/_fake/login"):
+                self.set_login(data["mode"], int(data.get("expires_in", _LOGIN_LIFETIME)))
             else:
                 raise _HttpError(404, f"Not Found: no control route for {method} {path}")
         except FileNotFoundError as err:
@@ -577,9 +649,9 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, status, body=b"", content_type="application/json; charset=utf-8"):
+    def _send(self, status, body=b"", content_type="application/json; charset=utf-8", headers=None):
         self.send_response(status)
-        for name, value in CORS.items():
+        for name, value in {**CORS, **(headers or {})}.items():
             self.send_header(name, value)
         if status != 204:
             self.send_header("Content-Type", content_type)
@@ -595,7 +667,9 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else b""
         status, payload = self.server.fake.handle(self.command, self.path, self.headers, body)
-        if isinstance(payload, bytes):
+        if isinstance(payload, Redirect):  # before the JSON case: a Redirect is a str
+            self._send(status, headers={"Location": payload})
+        elif isinstance(payload, bytes):
             self._send(status, payload, "application/vnd.github.raw; charset=utf-8")
         else:
             self._send(status, json.dumps(payload, ensure_ascii=False).encode("utf-8"))

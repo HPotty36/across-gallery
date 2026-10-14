@@ -15,13 +15,17 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import helpers  # puts scripts/ on sys.path
-from fake_github import FakeGitHub, blob_sha, tree_sha
+from fake_github import FakeGitHub, Redirect, blob_sha, tree_sha
 
 R = "HPotty36/nocturne"
 AUTH = "Bearer test-token"
 ORIGIN = "Access-Control-Allow-Origin"
+VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"  # the RFC 7636 appendix B pair
+CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+BACK = "http://localhost:8000/admin/?api=http%3A%2F%2F127.0.0.1%3A8790"  # where the admin page asks to be sent back
 ALLOWED_HEADERS = "Authorization, Content-Type, Accept, X-GitHub-Api-Version"
 FILES = {"queue/a/item.json": b'{"status": "waiting"}', "queue/a/full.jpg": b"FULL", "src/photos.json": b'{"n": 1}'}
 b64 = lambda data: base64.b64encode(data).decode("ascii")
@@ -283,6 +287,121 @@ class FakeApiTests(unittest.TestCase):
         self.assertEqual(self.fake.commits(R), 2)
 
 
+class FakeLoginTests(unittest.TestCase):
+    """The login page and the code-exchange Worker the admin page signs in through, asked in-process like FakeApiTests."""
+
+    def setUp(self):
+        self.fake = FakeGitHub()
+        self.fake.put_files(R, FILES)
+
+    def authorize(self, **changes):
+        """(status, payload) of the login page; a change of None leaves that parameter out."""
+        query = {"client_id": "x", "redirect_uri": BACK, "state": "s1", "code_challenge": CHALLENGE, "code_challenge_method": "S256", **changes}
+        return self.fake.handle("GET", "/login/oauth/authorize?" + urlencode({k: v for k, v in query.items() if v is not None}), {}, b"")
+
+    def new_code(self):
+        status, location = self.authorize()
+        self.assertEqual(status, 302)
+        return parse_qs(urlsplit(location).query)["code"][0]
+
+    def token(self, code, /, **changes):
+        """(status, parsed answer) of the code exchange; a change replaces a field, None leaves it out."""
+        body = {"code": code, "code_verifier": VERIFIER, "redirect_uri": BACK, **changes}
+        status, payload = self.fake.handle("POST", "/_auth/token", {}, json.dumps({k: v for k, v in body.items() if v is not None}).encode("utf-8"))
+        return status, json.loads(json.dumps(payload))
+
+    def push_allowed(self):
+        return self.fake.handle("GET", f"/repos/{R}", {"Authorization": AUTH}, b"")[1]["permissions"]["push"]
+
+    def test_authorize_sends_the_browser_back_with_a_code(self):
+        status, location = self.authorize()
+        self.assertEqual(status, 302)
+        self.assertIsInstance(location, Redirect)
+        self.assertTrue(location.startswith(BACK + "&"))  # the page's own ?api= stays, so the code is added after it
+        query = parse_qs(urlsplit(location).query)
+        self.assertEqual(query["state"], ["s1"])
+        self.assertEqual(query["api"], ["http://127.0.0.1:8790"])
+        self.assertEqual(len(query["code"]), 1)
+        self.assertNotEqual(query["code"][0], "")
+        self.assertNotEqual(query["code"][0], self.new_code())  # a new code every time
+        status, location = self.authorize(redirect_uri="http://localhost:8000/admin/")
+        self.assertEqual((status, location.startswith("http://localhost:8000/admin/?code=")), (302, True))
+        self.assertEqual(parse_qs(urlsplit(location).query)["state"], ["s1"])
+
+    def test_authorize_needs_a_redirect_and_s256(self):
+        for label, change in (("no redirect_uri", {"redirect_uri": None}), ("not a web address", {"redirect_uri": "javascript:alert(1)"}),
+                              ("plain challenge method", {"code_challenge_method": "plain"}), ("no challenge method", {"code_challenge_method": None}),
+                              ("no code_challenge", {"code_challenge": None})):
+            with self.subTest(label):
+                self.assertEqual(self.authorize(**change)[0], 400)
+
+    def test_token_needs_the_matching_verifier_and_works_once(self):
+        code = self.new_code()
+        self.assertEqual(self.token(code), (200, {"access_token": "test-token", "expires_in": 28800}))
+        self.assertEqual(self.token(code), (400, {"error": "bad_verification_code"}))  # a code works once
+        self.assertEqual(self.token(self.new_code(), code_verifier="x" * 43), (400, {"error": "bad_verification_code"}))
+        self.assertEqual(self.token("never-issued"), (400, {"error": "bad_verification_code"}))
+        # a code is gone after its first try, right or wrong
+        wrong_first = self.new_code()
+        self.assertEqual(self.token(wrong_first, code_verifier="x" * 43)[0], 400)
+        self.assertEqual(self.token(wrong_first)[0], 400)
+        self.fake.handle("PUT", "/_fake/token", {}, b'{"token": "rotated"}')
+        self.assertEqual(self.token(self.new_code())[1]["access_token"], "rotated")  # the token the fake accepts right now
+
+    def test_token_bodies_missing_a_field_are_bad_requests(self):
+        code = self.new_code()
+        for label, change in (("no code", {"code": None}), ("no code_verifier", {"code_verifier": None}),
+                              ("no redirect_uri", {"redirect_uri": None}), ("empty code", {"code": ""}), ("number", {"code": 7})):
+            with self.subTest(label):
+                self.assertEqual(self.token(code, **change), (400, {"error": "bad_request"}))
+        self.assertEqual(self.fake.handle("POST", "/_auth/token", {}, b"not json"), (400, {"error": "bad_request"}))
+        self.assertEqual(self.fake.handle("POST", "/_auth/token", {}, b"[]"), (400, {"error": "bad_request"}))
+        self.assertEqual(self.token(code)[0], 200)  # none of those used the code up
+
+    def test_login_routes_are_not_in_the_request_log(self):
+        self.token(self.new_code())
+        self.assertEqual(self.fake.requests, [])
+        self.assertEqual(self.fake.handle("GET", "/_auth/token", {}, b"")[0], 404)  # only the methods the real ones take
+        self.assertEqual(self.fake.handle("POST", "/login/oauth/authorize", {}, b"")[0], 404)
+
+    def test_login_modes(self):
+        self.fake.set_login("deny")
+        status, location = self.authorize()
+        self.assertEqual((status, isinstance(location, Redirect), location.startswith(BACK + "&")), (302, True, True))
+        query = parse_qs(urlsplit(location).query)
+        self.assertEqual((query["error"], query["state"], query["api"]), (["access_denied"], ["s1"], ["http://127.0.0.1:8790"]))
+        self.assertNotIn("code", query)
+        self.assertEqual(self.authorize(redirect_uri=None)[0], 400)  # denying does not excuse a missing address
+
+        self.fake.set_login("down")
+        self.assertEqual(self.token(self.new_code()), (502, {"error": "github_unreachable"}))
+
+        self.fake.set_login("reader")
+        self.assertTrue(self.push_allowed() is False)
+        self.assertEqual(self.token(self.new_code()), (200, {"access_token": "test-token", "expires_in": 28800}))  # the token still works
+
+        self.fake.set_login("ok", expires_in=900)
+        self.assertEqual(self.token(self.new_code()), (200, {"access_token": "test-token", "expires_in": 900}))
+        self.assertTrue(self.push_allowed() is True)
+        self.assertIn("code", parse_qs(urlsplit(self.authorize()[1]).query))
+        self.fake.set_login("ok")
+        self.assertEqual(self.token(self.new_code())[1]["expires_in"], 28800)  # set_login starts from the defaults
+
+    def test_login_control_route(self):
+        put = lambda body: self.fake.handle("PUT", "/_fake/login", {}, json.dumps(body).encode("utf-8"))
+        self.assertEqual(put({"mode": "reader", "expires_in": 60}), (200, {"ok": True}))
+        self.assertEqual((self.push_allowed(), self.token(self.new_code())[1]["expires_in"]), (False, 60))
+        self.assertEqual(put({"mode": "ok"}), (200, {"ok": True}))
+        self.assertEqual((self.push_allowed(), self.token(self.new_code())[1]["expires_in"]), (True, 28800))
+        for label, body in (("unknown mode", {"mode": "nope"}), ("no mode", {}), ("expires_in is not a number", {"mode": "ok", "expires_in": "soon"})):
+            with self.subTest(label):
+                self.assertEqual(put(body)[0], 400)
+        self.assertEqual(self.fake.handle("PUT", "/_fake/login", {}, b'{"mode":"nope"}')[0], 400)
+        self.assertEqual(self.push_allowed(), True)  # a refused change changed nothing
+        with self.assertRaises(ValueError):
+            self.fake.set_login("nope")
+
+
 def call(base, method, path, body=None, *, auth=AUTH, headers=None):
     """(status, response headers, parsed body) over HTTP. A connection this PC drops is tried again."""
     sent = dict(headers or {})
@@ -371,6 +490,35 @@ class FakeHttpTests(unittest.TestCase):
         self.assertEqual(self.fake.read_file(R, "new.txt"), b"NEW")
         status, _, error = self.call("PATCH", f"{git}/refs/heads/main", {"sha": head, "force": False})  # back to where it was
         self.assertEqual((status, error["message"]), (422, "Update is not a fast forward"))
+
+    def test_login_over_http(self):
+        class KeepRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args):
+                return None  # do not follow: the test wants to see the 302 itself
+        query = urlencode({"client_id": "x", "redirect_uri": BACK, "state": "s1", "code_challenge": CHALLENGE, "code_challenge_method": "S256"})
+
+        def authorize():
+            try:
+                urllib.request.build_opener(KeepRedirect).open(self.fake.url + "/login/oauth/authorize?" + query, timeout=10).close()
+            except urllib.error.HTTPError as err:
+                with err:
+                    return err.code, err.headers, err.read()
+            self.fail("the login page should answer with a redirect")
+        status, head, raw = retrying(authorize)  # a repeated GET is harmless
+        self.assertEqual((status, raw), (302, b""))
+        self.assertEqual(head[ORIGIN], "*")
+        location = head["Location"]
+        self.assertTrue(location.startswith(BACK + "&"))
+        self.assertEqual(parse_qs(urlsplit(location).query)["state"], ["s1"])
+        self.assertTrue(parse_qs(urlsplit(location).query)["code"][0])
+        # A code that was never issued fails the same way however often it is sent, so a resent request cannot change the answer.
+        status, head, answer = self.call("POST", "/_auth/token", {"code": "never-issued", "code_verifier": VERIFIER, "redirect_uri": BACK},
+                                         auth=None, headers={"Origin": "http://localhost:8000"})
+        self.assertEqual((status, answer), (400, {"error": "bad_verification_code"}))
+        self.assertEqual(head[ORIGIN], "*")
+        self.assertEqual(head["Content-Type"], "application/json; charset=utf-8")
+        self.assertEqual(self.call("OPTIONS", "/_auth/token", auth=None, headers={"Origin": "http://localhost:8000"})[0], 204)  # the preflight a browser sends first
+        self.assertEqual(self.call("GET", "/_fake/log", auth=None)[2], {"requests": []})  # neither login request is logged
 
     def test_one_connection_serves_many_requests(self):
         def run():
