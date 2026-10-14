@@ -45,6 +45,11 @@ class BuildTests(unittest.TestCase):
         self.assertIn('<a href="#river"><span class="num" aria-hidden="true">I</span>강</a>', html)
         self.assertIn('<h2>강 <span class="room-en" lang="en">River</span></h2>', html)
 
+    def test_footer_links_to_the_admin_page(self):
+        foot = re.search(r'<footer class="foot">(.*?)</footer>', self.html(), re.S).group(1)
+        last = re.findall(r"<p>.*?</p>", foot, re.S)[-1]
+        self.assertTrue(last.endswith(' · <a class="foot-admin" href="admin/">관리</a></p>'), last)
+
     def test_escapes_text(self):
         data = photolib.load_data(self.root); data["rooms"][0]["photos"][1]["title"] = "<b>&"
         photolib.save_data(self.root, data)
