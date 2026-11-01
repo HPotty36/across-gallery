@@ -29,9 +29,9 @@
   </picture>
 </p>
 
-Nocturne은 정적 사진 전시 사이트입니다. 폰이나 PC에서 사진을 올리면 Ollama에서 도는 공개 모델이 방을 고르고
-제목과 대체 텍스트를 써서 걸고, 사이트는 GitHub Pages에서 다시 만들어집니다. 모든 것이 저장소에 있습니다.
-데이터베이스도, 유료 API도 없습니다.
+Nocturne은 정적 사진 전시 사이트입니다. 폰이나 PC에서 사진을 올리면 Claude가 방을 고르고 제목과 대체 텍스트를
+써서 걸고(Claude가 못 쓰면 Ollama에서 도는 공개 모델이 대신 씁니다), 사이트는 GitHub Pages에서 다시 만들어집니다.
+모든 것이 저장소에 있습니다. 데이터베이스는 없습니다.
 
 ## 특징
 
@@ -39,7 +39,7 @@ Nocturne은 정적 사진 전시 사이트입니다. 폰이나 PC에서 사진�
 - **꽉 찬 행**: 모든 행이 가로폭을 채우고, 사진은 원래 비율 그대로입니다. 잘리지 않습니다.
 - **크게 보기**: 사진을 누르면 크게 봅니다. 방향키, 스와이프, Esc가 됩니다.
 - **올리고 잊기**: 폰이나 PC에서 사진을 고르면 AI가 방을 고르고 제목과 대체 텍스트를 써서 바로 게시합니다. 고칠 것은 나중에 고칩니다.
-- **유료 API 없음**: 집 PC의 Ollama(gemma4 12B), PC가 꺼져 있으면 GitHub Actions(gemma4 e4b). e4b가 쓴 글은 나중에 12B가 조용히 다시 씁니다.
+- **Claude가 먼저, Ollama는 예비**: GitHub Actions가 Claude API의 Claude Opus 5.5로 씁니다. 비용은 Claude 구독에 딸린 API 크레딧에서 나갑니다. Claude가 못 쓰면 같은 실행에서 Ollama의 gemma4 e4b가 이어 쓰고, Actions가 아예 돌지 못하면 5분 뒤 집 PC(gemma4 12B)가 맡습니다. e4b가 쓴 글은 나중에 12B가 조용히 다시 씁니다.
 - **사람이 먼저**: 사람이 고친 제목, 설명, 방은 AI가 다시 바꾸지 않습니다.
 - **개인정보**: 메타데이터는 올리기 전에 브라우저에서 지웁니다. GPS는 읽지 않습니다.
 - **GitHub 로그인**: GitHub App과 PKCE, 작은 Cloudflare Worker. 토큰은 페이지 메모리에만 있고 어디에도 저장하지 않습니다.
@@ -47,16 +47,19 @@ Nocturne은 정적 사진 전시 사이트입니다. 폰이나 PC에서 사진�
 
 ## 동작 방식
 
-관리 페이지가 사진을 줄이고 메타데이터를 지워 `queue/`에 커밋합니다. 먼저 맡은 AI가 방, 제목, 대체 텍스트를
-쓰고 한 커밋으로 게시합니다. 그러면 `site.yml` 워크플로가 사이트를 다시 만듭니다.
+관리 페이지가 사진을 줄이고 메타데이터를 지워 `queue/`에 커밋합니다. GitHub Actions가 바로 맡고 Claude가 방,
+제목, 대체 텍스트를 씁니다. Claude가 못 쓴 사진은 같은 실행에서 gemma4 e4b가 씁니다. 5분이 지나도 아무도 맡지 않은
+사진은 집 PC 도우미가 맡습니다. 초안은 한 커밋으로 게시되고, `site.yml` 워크플로가 사이트를 다시 만듭니다.
 
 ```mermaid
 flowchart LR
   A["관리 페이지<br/>메타데이터 지우기, 줄이기"] -->|"한 커밋"| Q[("queue/")]
-  Q -->|"20초마다"| PC["집 PC 도우미<br/>Ollama, gemma4 12B"]
-  Q -->|"60초 뒤, 아무도 안 맡았으면"| GH["GitHub Actions<br/>Ollama, gemma4 e4b"]
-  PC -->|"한 커밋"| P["photos.json + photos/"]
-  GH -->|"한 커밋"| P
+  Q -->|"바로"| C["GitHub Actions<br/>Claude API, Opus 5.5"]
+  C -->|"Claude가 못 쓰면, 같은 실행에서"| E["GitHub Actions<br/>Ollama, gemma4 e4b"]
+  Q -->|"5분 뒤, 아무도 안 맡았으면"| PC["집 PC 도우미<br/>Ollama, gemma4 12B"]
+  C -->|"한 커밋"| P["photos.json + photos/"]
+  E -->|"한 커밋"| P
+  PC -->|"한 커밋"| P
   P --> S["site.yml"] --> G["GitHub Pages"]
 ```
 
@@ -81,8 +84,8 @@ sequenceDiagram
 | 부분 | 쓰는 것 |
 |:---|:---|
 | 프런트엔드 | HTML, CSS, JavaScript 그대로. 관리 페이지는 ES 모듈만 씁니다: 프레임워크·번들러 없음, 엄격한 CSP |
-| 스크립트 | Python 3 + Pillow: 사이트 빌드, 사진 변환, AI 작업, 집 PC 도우미 |
-| AI | Ollama, gemma4 12B(집 PC)와 gemma4 e4b(GitHub Actions) |
+| 스크립트 | Python 3 + Pillow(Actions에서는 `anthropic` SDK도): 사이트 빌드, 사진 변환, AI 작업, 집 PC 도우미 |
+| AI | Claude API의 Claude Opus 5.5(GitHub Actions). 예비로 Ollama, gemma4 e4b(GitHub Actions)와 gemma4 12B(집 PC) |
 | 호스팅 | GitHub Pages, GitHub Actions로 배포 |
 | 인증 | GitHub App(사용자 토큰, PKCE) + 코드 교환용 Cloudflare Worker |
 | 시험 | Python `unittest`, Node 테스트 러너, 가짜 GitHub 서버 |
@@ -97,7 +100,7 @@ py -m unittest discover -s tests -v        # Python 시험
 node --test "tests/js/*.test.js"           # JS 시험 (Node 24)
 ```
 
-`py`는 Windows의 Python 실행기입니다. 다른 OS에서는 `python3`을 씁니다. 시험은 네트워크와 Ollama 없이 통과합니다.
+`py`는 Windows의 Python 실행기입니다. 다른 OS에서는 `python3`을 씁니다. 시험은 네트워크, Ollama, Claude API 키 없이 통과합니다.
 진짜 저장소를 건드리지 않고 관리 페이지를 시험하려면 들어 있는 가짜 GitHub 서버에 붙입니다:
 [CLAUDE.md](CLAUDE.md#관리-페이지를-컴퓨터에서만-시험하기) 참고.
 

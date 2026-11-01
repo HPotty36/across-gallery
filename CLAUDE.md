@@ -1,6 +1,6 @@
 # Nocturne — 사진 전시 사이트
 
-직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. 유료 API는 쓰지 않는다 (집 PC의 Ollama, 꺼져 있으면 GitHub Actions의 Ollama). 사이트는 `index.html` 한 장, `photos/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
+직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. AI는 GitHub Actions에서 Claude API(`claude-opus-5-5`, Max 요금제에 딸린 API 크레딧으로)를 쓴다. Claude가 못 쓰면 같은 실행에서 Ollama의 e4b가, Actions가 돌지 못하면 집 PC의 Ollama(12B)가 대신 쓴다. 사이트는 `index.html` 한 장, `photos/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
 
 ## 구조
 
@@ -21,19 +21,20 @@ scripts/
   photolib.py            이름 규칙, EXIF 힌트, 흑백 판별, 메타데이터 없는 사본, photos.json 읽기·쓰기, ai 함수
   build.py               template + photos.json -> index.html (--out 이면 _site 조립)
   prepare_photos.py      originals/ 의 원본을 웹용 사본으로 변환 (명령줄 흐름)
-  curator.py             Ollama에게 방·제목·설명 초안 요청, 확신도, alt 후처리
+  curator.py             Claude API나 Ollama에게 방·제목·설명 초안 요청, 확신도, alt 후처리
   queue_items.py         item.json 형식과 누가 맡을 수 있는지 규칙
   github_api.py          표준 urllib GitHub 클라이언트 (파일 읽기·쓰기, 한 커밋 쓰기)
-  worker.py              대기열 항목 맡기 -> 초안 -> 한 커밋 게시, 다듬기; Actions용 --check / --run
+  worker.py              대기열 항목 맡기 -> 초안 -> 한 커밋 게시, 다듬기; Actions용 --check / --run (--ai claude|ollama)
   pc_helper.py           집 PC에서 도는 도우미 (20초마다 대기열, 한가하면 30분마다 다듬기)
 .github/workflows/
   site.yml               Pages 빌드·배포
-  draft.yml              PC가 못 맡은 사진을 GitHub에서 초안 쓰고 게시
+  draft.yml              올린 사진을 GitHub에서 바로 초안 쓰고 게시 (Claude, 못 쓴 사진만 e4b)
 .github/assets/          README·소셜 미리보기 그림 (손으로 만든 것, 알아둘 것)
 tests/                   Python unittest, tests/js (node), fake_github.py(가짜 GitHub), browser/(브라우저 점검)
 docs/superpowers/        설계 문서(specs)와 구현 계획(plans)
 originals/               원본 사진. git에 올리지 않음 (.gitignore)
 index.html               로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
+requirements-ai.txt      Claude SDK(anthropic). draft.yml만 설치한다 (사이트 빌드·시험·PC에는 필요 없음)
 README.md / README.ko.md 저장소 첫 화면 소개 (영어 기본 / 한국어, 내용 같음)
 LICENSE                  코드는 MIT (GitHub가 MIT로 알아보게 표준 문구만 둔다)
 NOTICE.md                photos/·queue/의 사진은 MIT가 아님 (모든 권리 보유)
@@ -56,7 +57,7 @@ py scripts\pc_helper.py                          # PC 도우미 실행. 콘솔 �
 - 미리보기에 `py -m http.server`를 쓰지 말 것. 이 PC에서는 연결이 끊긴다. `serve.py`를 쓴다 (127.0.0.1 전용).
 - `index.html`을 브라우저로 바로 열어도 동작한다.
 - PC 도우미 기록은 `%APPDATA%\nocturne\helper.log`. 로그온 때 자동 실행은 Windows 작업 스케줄러에 "로그온할 때" 작업으로 등록한다.
-- 시험은 둘 다 네트워크·Ollama 없이 통과한다.
+- 시험은 둘 다 네트워크·Ollama 없이 통과한다. Python 시험은 `anthropic` 패키지와 Claude API 키도 필요 없다.
 
 ### 관리 페이지를 컴퓨터에서만 시험하기
 
@@ -67,7 +68,7 @@ py tests\fake_github.py --port 8790 --seed       # --seed: 지금 photos.json과
 py tests\browser\serve.py --port 8000
 ```
 
-`http://localhost:8000/admin/?api=http://127.0.0.1:8790` 을 열고 **GitHub로 로그인**을 누르면 가짜 서버가 바로 들여보낸다 (토큰을 넣지 않는다). 그다음부터는 열기만 해도 저절로 로그인된다. `?api=`는 관리 페이지를 `localhost`나 `127.0.0.1`에서 열었을 때만 먹고, 주소는 `http://127.0.0.1:<포트>` 꼴이어야 한다 (`localhost:<포트>` 등 다른 주소는 무시하고 진짜 GitHub에 붙는다). 올린 사진을 가짜 AI(제목 "초안")로 게시해 보려면 `py tests\browser\run_worker.py http://127.0.0.1:8790 --by pc` (또는 `--by github`).
+`http://localhost:8000/admin/?api=http://127.0.0.1:8790` 을 열고 **GitHub로 로그인**을 누르면 가짜 서버가 바로 들여보낸다 (토큰을 넣지 않는다). 그다음부터는 열기만 해도 저절로 로그인된다. `?api=`는 관리 페이지를 `localhost`나 `127.0.0.1`에서 열었을 때만 먹고, 주소는 `http://127.0.0.1:<포트>` 꼴이어야 한다 (`localhost:<포트>` 등 다른 주소는 무시하고 진짜 GitHub에 붙는다). 올린 사진을 가짜 AI(제목 "초안")로 게시해 보려면 `py tests\browser\run_worker.py http://127.0.0.1:8790 --by pc` (또는 `--by github`). 둘 다 방금 올린 사진을 맡는다: `--by github`은 진짜처럼 바로, `--by pc`는 시계를 6분 앞당겨 PC의 5분 기다림을 건너뛴다. `--by github`은 e4b 단계처럼 써서 `ai.model`이 e4b가 된다 (다듬기 대상).
 
 로컬 미리보기에서 사이트 바닥글의 "관리"를 누르면 `?api=` 없는 `admin/`이 열려 진짜 GitHub에 붙는다. 시험할 때는 위 `?api=` 주소를 바로 연다.
 
@@ -88,21 +89,23 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 
 1. 관리 페이지(주소는 배포 항목)를 폰이나 PC에서 열고 사진을 고른다. 브라우저 안에서 메타데이터를 지우고(JFIF·ICC 구간만 남김), 긴 변 2400px·1000px로 줄이고, 날짜·카메라(GPS는 읽지 않음)와 흑백 여부를 알아낸다.
 2. 사본 두 장과 `item.json`이 `queue/<name>/`에 한 커밋으로 올라간다. 이 순간부터 몇 분간 공개 저장소에서는 보이지만 사이트에는 나오지 않는다. 올린 뒤 페이지를 닫아도 된다.
-3. 누가 먼저 맡는다.
-   - 집 PC가 켜져 있고 Ollama가 돌면 PC 도우미가 20초 안에 맡아 12B(`gemma4:12b-it-qat`)로 초안을 쓴다.
-   - 아니면 올린 지 60초 뒤 GitHub Actions(`draft.yml`)가 맡아 e4b(`gemma4:e4b-it-qat`)로 쓴다.
-4. 초안(방, 제목, alt)을 쓰면 사람 확인 없이 바로 게시한다: 사진 두 장 이동 + `photos.json` 추가 + 대기열 삭제가 한 커밋. `site.yml`이 사이트를 다시 만든다 (1~2분).
+3. 누가 맡는다.
+   - 올림 커밋이 push되면 GitHub Actions(`draft.yml`)가 바로 맡아 Claude(`claude-opus-5-5`)로 초안을 쓴다.
+   - Claude가 못 쓴 사진은 같은 실행에서 e4b(`gemma4:e4b-it-qat`, Ollama)가 이어서 쓴다. Claude API 키를 넣기 전에는 e4b가 전부 쓴다.
+   - 올린 지 5분이 지나도 아무도 맡지 않은 사진(Draft가 꺼짐, GitHub 장애 등)은 집 PC 도우미가 맡아 12B(`gemma4:12b-it-qat`)로 쓴다. PC가 켜져 있고 Ollama가 돌 때만.
+4. 초안(방, 제목, alt)을 쓰면 누가 썼든 사람 확인 없이 바로 게시한다: 사진 두 장 이동 + `photos.json` 추가 + 대기열 삭제가 한 커밋. `site.yml`이 사이트를 다시 만든다 (1~2분).
 5. 잘못된 건 관리 페이지의 **전시 중** 탭에서 고친다 (방, 제목, 설명 저장 / AI로 다시 쓰기 / 대표 지정 / 삭제). 방 배정 확신도가 0.8 미만이면 "확인 필요" 배지가 붙는다.
-6. PC의 AI가 못 쓰면 그 사진은 다시 대기로 돌아가 GitHub가 이어서 맡는다. GitHub의 AI도 실패한 사진은 **새 사진** 탭에 남는다: 다시 시도 / 직접 입력해서 게시 / 버리기.
-7. e4b가 쓴 설명은 PC가 켜져 있고 대기열이 비어 있을 때 PC 도우미가 30분마다 12B로 다시 써서 바꾼다. 사람이 고친 칸과 방은 AI가 절대 바꾸지 않는다.
+6. Claude가 못 쓰면 같은 실행의 e4b가, PC의 AI가 못 쓰면 GitHub가 이어서 맡는다 (그 사진은 다시 대기로 돌아간다). e4b도 실패한 사진은 **새 사진** 탭에 남는다: 다시 시도 / 직접 입력해서 게시 / 버리기.
+7. e4b가 쓴 설명은 PC가 켜져 있고 대기열이 비어 있을 때 PC 도우미가 30분마다 12B로 다시 써서 바꾼다. Claude나 12B가 쓴 글은 다시 쓰지 않는다. 사람이 고친 칸과 방은 AI가 절대 바꾸지 않는다.
 
-대기열 항목 `status`: `waiting` → `pc` 또는 `github`(맡아서 처리 중) → 게시되면 폴더 삭제 / `failed`. PC는 `waiting`을 바로, GitHub는 올린 지 60초 지난 것만 맡는다. 10분 넘게 끝나지 않은 맡김은 죽은 것으로 보고 다시 맡을 수 있다 (관리 페이지에서 버릴 수도 있다). 동시에 맡으려 하면 파일 sha 때문에 늦은 쪽이 물러난다.
+대기열 항목 `status`: `waiting` → `pc` 또는 `github`(맡아서 처리 중) → 게시되면 폴더 삭제 / `failed`. GitHub는 `waiting`을 바로, PC는 올린 지 5분 지난 것만 맡는다. 10분 넘게 끝나지 않은 맡김은 죽은 것으로 보고 다시 맡을 수 있다 (관리 페이지에서 버릴 수도 있다). 동시에 맡으려 하면 파일 sha 때문에 늦은 쪽이 물러난다.
 
+- Claude 단계에서 Claude가 못 쓰면(키·크레딧·API 오류, 거절, 맡은 뒤 예상 못 한 오류) `failed`로 두지 않고 `waiting`으로 넘긴다 (커밋 메시지 `대기열: <name> Claude 실패, Ollama로 넘김`, 이유는 `error`와 Actions 기록의 `Claude` 경고에 남는다). 같은 실행의 e4b 단계가 이어 맡는다. 이 메시지에는 `올림`도 `다시 시도`도 없어서 `draft.yml`을 다시 시작하지 않는다.
 - PC의 AI가 못 쓰면(Ollama가 도중에 꺼짐, 모델이 답을 못 줌) `failed`로 두지 않고 `waiting`으로 돌려놓는다 (커밋 메시지 `대기열: <name> 다시 시도 (PC AI 실패)`, 이유는 `error`에 남는다). 그러면 `draft.yml`이 GitHub에서 맡고, PC 도우미는 그 항목을 30분 동안 건드리지 않는다.
-- `failed`가 되는 경우: GitHub의 AI가 실패, 대기열 사진 파일이 없거나 읽을 수 없음, 같은 이름의 사진이 이미 있음, 맡은 뒤 예상 못 한 오류(`AI 처리 중 문제가 생겼어요`, 자세한 내용은 Actions 기록이나 `helper.log`). `failed`는 사람이 다시 시도를 눌러야 `waiting`이 된다.
+- `failed`가 되는 경우: e4b 단계의 AI가 실패, 대기열 사진 파일이 없거나 읽을 수 없음, 같은 이름의 사진이 이미 있음, e4b 단계나 PC에서 맡은 뒤 예상 못 한 오류(`AI 처리 중 문제가 생겼어요`, 자세한 내용은 Actions 기록이나 `helper.log`; Claude 단계에서는 위처럼 넘긴다). `failed`는 사람이 다시 시도를 눌러야 `waiting`이 된다.
 - GitHub에 닿지 못한 오류는 기록하지 않는다. 그 항목은 10분 뒤 다른 쪽이 다시 맡는다.
 
-`draft.yml`은 `queue/**` push 중 커밋 메시지에 `올림` 또는 `다시 시도`가 들어 있을 때만 일한다 (30분마다 도는 `schedule`과 수동 실행도 있다). 대기열 커밋 메시지를 바꿀 때 이 말을 지우지 말 것. GitHub가 게시한 뒤에는 `gh workflow run site.yml`로 사이트를 직접 다시 만든다 (`GITHUB_TOKEN`으로 한 push는 다른 워크플로를 시작하지 않는다).
+`draft.yml`은 `queue/**` push 중 커밋 메시지에 `올림` 또는 `다시 시도`가 들어 있을 때만 일한다 (30분마다 도는 `schedule`과 수동 실행도 있다). 대기열 커밋 메시지를 바꿀 때 이 말을 지우지 말 것. 거꾸로 Claude가 넘기는 커밋에는 넣지 말 것 (넣으면 draft.yml이 다시 시작돼 같은 실패를 되풀이한다). 한 실행 안에서 Claude 단계가 맡을 수 있는 사진을 모두 쓰고, 남은 사진이 있을 때만 Ollama와 모델을 준비해 e4b 단계가 쓴다. Claude 단계가 도는 사이에 새로 올라온 사진은 e4b가 쓸 수도 있다 (나중에 PC가 다듬는다). 두 단계 중 하나라도 게시했으면 `gh workflow run site.yml`로 사이트를 직접 다시 만든다 (`GITHUB_TOKEN`으로 한 push는 다른 워크플로를 시작하지 않는다).
 
 ### 명령줄 대안
 
@@ -122,8 +125,10 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 `ai`는 AI가 쓴 칸을 기록한다. 사이트에는 표시하지 않는다.
 
 - AI가 게시하면 `{"model": "gemma4:e4b-it-qat", "fields": ["title","alt"], "confidence": 0.61}`. 확신도를 못 구하면 `confidence`가 없다.
+- `model`은 실제로 답한 모델이다. Claude는 보통 `claude-opus-5-5`이고, 거절에 대비한 대체 모델이 답했으면 그 이름이 남는다.
+- `confidence`(방 배정 확신도): Ollama는 답에서 방 이름의 확률로 계산하고, Claude는 Claude가 스스로 매긴 값(0~1로 자름)을 쓴다. 어느 쪽이든 0.8 미만이면 "확인 필요" 배지가 붙는다.
 - 관리 페이지에서 사람이 저장하면 바뀐 칸은 `fields`에서 빠지고 `confidence`는 지운다 (사람이 봤으니). `fields`가 비면 `ai` 전체를 지운다.
-- 다듬기 대상: `ai.fields`가 비어 있지 않고 `ai.model`이 PC 모델이 아닌 사진. 다듬기는 `ai.fields`에 남은 칸만 바꾸고, 방과 확신도는 그대로 둔다.
+- 다듬기 대상: `ai.fields`가 비어 있지 않고 `ai.model`이 e4b(`gemma4:e4b-it-qat`, `curator.UPGRADE_FROM`)인 사진. Claude나 12B가 쓴 글은 다듬지 않는다. 다듬기는 `ai.fields`에 남은 칸만 바꾸고, 방과 확신도는 그대로 둔다.
 - "AI로 다시 쓰기"(`redraft`)는 AI가 맡아서 처리를 시작한 때와 글자가 같은 칸만 바꾼다 (그 사이 사람이 고친 칸은 그대로). 바꾼 칸이 `ai.fields`가 되고 `ai.model`은 쓴 모델, 방과 확신도는 그대로.
 - `photos.json`에서 AI가 쓴 제목이나 설명을 직접 고쳤다면 그 칸을 `ai.fields`에서도 빼야 한다 (비면 `ai`를 통째로 지운다). 그대로 두면 PC 도우미의 12B 다듬기가 고친 글을 덮어쓸 수 있다. 관리 페이지에서 저장하면 이건 저절로 된다.
 
@@ -177,6 +182,20 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 6. `py scripts\pc_helper.py --setup` 에 붙여 넣으면 `%APPDATA%\nocturne\helper.json`에 저장된다.
 7. 만료되기 전에 새로 만들어 다시 넣는다. 토큰이 샜다면 같은 화면(Fine-grained tokens)에서 그 토큰을 **Delete**로 지운다.
 
+## Claude API 키 넣기
+
+GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Claude API를 부른다. 비용은 Max 요금제에 딸린 API 크레딧에서 나간다. 키가 없으면 Claude 단계는 건너뛰고 e4b로만 돈다.
+
+1. **크레딧 연결**: claude.ai → **Settings** → **Billing** → **API credits**에서 Console 조직을 연결한다 (Max 요금제).
+2. **API 키 만들기**: Claude Console(`platform.claude.com`)의 API 키 화면에서 새 키를 만든다. 이름은 알아보기 쉽게 (예: `nocturne-draft`). 보이는 키를 복사한다 (다시 볼 수 없다).
+3. **GitHub에 넣기**: 저장소 **Settings** → **Secrets and variables** → **Actions** → **New repository secret**. Name은 `ANTHROPIC_API_KEY`, Secret에 키를 붙여 넣고 **Add secret**.
+4. **한도 걸기**: Console에서 월 사용 한도를 건다. 크레딧보다 많이 쓰지 않게 한다.
+5. **확인**: 사진 한 장을 올리고 Actions의 Draft 실행에서 `Claude로 초안 쓰고 게시` 단계에 `published: <name>`이 찍히는지 본다. 그 사진의 `ai.model`은 `claude-opus-5-5`다.
+
+- 키는 GitHub 비밀값에만 둔다. PC 도우미는 Claude를 부르지 않으니 PC에는 두지 않는다. 파일이나 커밋에 넣지 말 것.
+- 키를 바꾸려면 Console에서 새 키를 만들어 같은 비밀값을 고치고(**Update secret**), 옛 키는 Console에서 지운다. 키가 샜을 때도 같다.
+- 모델을 바꾸려면 `draft.yml`의 `NOCTURNE_CLAUDE_MODEL` 값만 고친다 (기본 `claude-opus-5-5`).
+
 ## 지켜야 할 것
 
 - 사이트 어디에도 소유자의 실명을 넣지 않는다. 사이트 이름은 "Nocturne".
@@ -222,7 +241,16 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 
 ## 문제가 생기면
 
-- **Actions 기록**: https://github.com/HPotty36/nocturne/actions 에서 `Draft`(GitHub 대타)와 `Site`(사이트 빌드)의 실행마다 단계별 기록을 본다. 관리 페이지 위쪽의 "반영 실패"도 여기로 이어진다. Draft를 잠시 끄려면 Actions 탭 왼쪽에서 `Draft` → 오른쪽 위 `…` → **Disable workflow** (명령줄은 `gh workflow disable draft.yml`, 다시 켜기는 `gh workflow enable draft.yml`). 꺼 둔 동안 PC가 못 맡은 사진은 대기열에 남는다.
+- **Actions 기록**: https://github.com/HPotty36/nocturne/actions 에서 `Draft`(GitHub의 AI: Claude, e4b)와 `Site`(사이트 빌드)의 실행마다 단계별 기록을 본다. 관리 페이지 위쪽의 "반영 실패"도 여기로 이어진다. Draft를 잠시 끄려면 Actions 탭 왼쪽에서 `Draft` → 오른쪽 위 `…` → **Disable workflow** (명령줄은 `gh workflow disable draft.yml`, 다시 켜기는 `gh workflow enable draft.yml`). 꺼 둔 동안에는 PC 도우미가 올린 지 5분 지난 사진을 맡고, PC도 꺼져 있으면 사진은 대기열에 남는다.
+- **Claude가 못 쓸 때**: Draft 실행 화면에 `Claude` 경고가 `<name>: <이유>`로 뜬다 (같은 이유가 넘김 커밋의 `item.json` `error`에도 남는다). 그 사진은 같은 실행의 e4b가 이어 쓴다 (e4b도 실패하면 새 사진 탭에 남는다). 이유별로 할 일:
+  - `Claude API 키가 맞지 않아요`(또는 `Claude API 키가 없어요`): 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기).
+  - `Claude API 권한이나 크레딧을 확인해 주세요`: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지, claude.ai의 크레딧 연결이 풀리지 않았는지 본다.
+  - `Claude API 요청이 너무 많아요`: 잠시 뒤 저절로 풀린다. 계속되면 Console의 한도를 본다.
+  - `Claude API 오류 <상태>`, `Claude API에 연결하지 못했어요`, `Claude의 답이 끊겼어요`, `Claude의 답을 읽을 수 없어요 (…)`: 대개 잠깐 문제다. 계속되면 Claude 단계 기록을 본다.
+  - `Claude가 이 사진의 초안을 거절했어요`: e4b가 대신 썼으니 전시 중 탭에서 그 사진의 방·제목·설명을 확인한다.
+  - `anthropic 패키지가 없어요`: `Claude SDK 설치` 단계가 실패했다. 그 단계 기록을 본다.
+  - `AI 처리 중 문제가 생겼어요`: Claude 단계의 예상 못 한 오류다. 그 단계 기록의 traceback을 본다.
+  - 키를 넣었는데 Claude 단계 기록에 `Claude API 키가 없어서 Claude 단계를 건너뛰어요`가 찍히면 비밀값 이름이 `ANTHROPIC_API_KEY`인지, 저장소 비밀값(Actions)으로 넣었는지 본다.
 - **PC 도우미 멈추기·다시 켜기**: 콘솔에서 돌렸으면 그 창에서 Ctrl+C. `pyw`로 돌렸으면 작업 관리자의 세부 정보에서 `pythonw.exe`(명령줄에 `pc_helper.py`가 있는 것)를 끝내거나, 작업 스케줄러에 등록했다면 그 작업을 **끝내기**. 다시 켜려면 `pyw scripts\pc_helper.py` (또는 작업 스케줄러에서 **실행**).
 - **`helper.log` 읽기** (`%APPDATA%\nocturne\helper.log`, 한 줄에 하나): `시작`·`멈춤`, `published:<name>`(게시), `released:<name>`(PC의 AI가 못 써서 GitHub에 넘김), `upgraded:<file>`(다듬기), `failed:<…>`, `오류 …`(같은 오류가 이어지면 처음 한 번만 적힌다). 맡은 뒤에 난 예상 못 한 오류는 그 아래에 traceback이 여러 줄로 붙는다.
 - **로그인이 안 될 때** (관리 페이지)
@@ -253,10 +281,13 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 
 - 이 PC는 로컬 루프백 연결의 일부를 끊는다 (WinError 10054). 그래서 `github_api.py`와 `curator.py`는 끊긴 요청을 다시 보내고, 브라우저 점검은 `serve.py`를 쓴다.
 - Ollama 0.35.1이 같은 증상을 보인다: 요청의 일부가 `wsarecv: An existing connection was forcibly closed` 500으로 실패하고 바로 다시 보내면 성공한다. 그래서 `curator.py`는 최대 3번 시도한다 (연결 거부와 모델 없음은 바로 포기). `draft.yml`도 같은 0.35.1로 고정했고, 내려받은 파일은 그 릴리스의 `sha256sum.txt` 값으로 확인한다. 버전을 올릴 때 이 값도 같이 바꾼다.
-- `draft.yml`에서 쓰기 권한이 있는 `GITHUB_TOKEN`은 worker 단계(`--check`, `--run`)에만 준다. 내려받은 Ollama가 도는 단계에 토큰을 넣지 말 것.
+- `draft.yml`에서 쓰기 권한이 있는 `GITHUB_TOKEN`은 worker 단계(`--check`, `--run`)에만, `ANTHROPIC_API_KEY`는 Claude 단계에만 준다. 내려받은 Ollama가 도는 단계에 토큰이나 키를 넣지 말 것. 키와 Claude API의 답 원문은 기록이나 `item.json`에 남기지 않는다.
+- Anthropic에는 썸네일(긴 변 1000px, 메타데이터를 지운 사본)과 지시문(방 목록, 기존 사진의 제목·alt 예시)만 보낸다. 큰 사본이나 원본은 보내지 않는다.
+- Claude 비용은 사진 한 장(또는 다시 쓰기 한 번)에 약 $0.02다 (Opus 5.5, effort low). Max 요금제의 API 크레딧에서 나간다. 키가 없으면 Claude 단계는 건너뛰고 e4b로만 돈다.
+- Claude SDK(`anthropic`)는 `draft.yml`의 `Claude SDK 설치` 단계가 `requirements-ai.txt`로 설치한다. 이 단계가 실패해도 실행은 이어지고, Claude 단계가 사진을 모두 e4b로 넘긴다 (`anthropic 패키지가 없어요`).
 - API로 만드는 커밋(worker, PC 도우미, 관리 페이지)은 작성자를 `HPotty36 <112685098+HPotty36@users.noreply.github.com>`로 적는다 (`github_api.AUTHOR`, `admin/config.js`의 `COMMIT_AUTHOR`). 계정 프로필의 이름·이메일이 공개 기록에 들어가지 않게 하려는 것이니 지우지 말 것.
 - AI 제목은 40자, 설명은 200자에서 자른다 (낱말 경계에서). 흑백 표시는 자른 뒤에 붙는다.
-- 모델: PC `gemma4:12b-it-qat` (기본), Actions `gemma4:e4b-it-qat` (환경변수 `NOCTURNE_MODEL`). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.
+- 모델: Actions는 Claude `claude-opus-5-5` (환경변수 `NOCTURNE_CLAUDE_MODEL`), 못 쓴 사진만 `gemma4:e4b-it-qat` (`NOCTURNE_MODEL`). PC는 `gemma4:12b-it-qat` (기본). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.
 - README 그림(`.github/assets/`)은 자동으로 다시 만들지 않는다. 디자인이 바뀌면 손으로 다시 찍는다. 화면 그림은 공개 사이트를 headless Chrome(DevTools 프로토콜)으로 찍었다: 1440×900, 폰 390×844 2배, `prefers-color-scheme` 어둡게·밝게, JPEG 품질 82. 워드마크(Cormorant Garamond 이탤릭, 배경 투명)와 소셜 미리보기(1280×640, `photos/thumb/`의 사진 다섯 장)는 저장소 밖의 작은 HTML을 같은 방법으로 찍었다. 관리 페이지는 찍지 않는다. `social-preview.jpg`는 저장소 **Settings** → **Social preview**에 손으로 올린다.
 - 관리 페이지의 토큰은 로그인으로 받는 8시간짜리 `ghu_…` 토큰이고, 열린 페이지의 메모리에만 있다. localStorage·sessionStorage·쿠키·주소·기록 어디에도 쓰지 않는다. 브라우저에 남는 것은 localStorage `nocturne.signedIn`("이 기기에서 로그인한 적 있음", 비밀 아님)과, 로그인하러 다녀오는 동안의 sessionStorage `nocturne.login`(위조 방지 값과 PKCE 원문, 돌아오자마자 지움)·`nocturne.auto`(이 탭에서 저절로 로그인을 이미 해 봄)뿐이다. 옛 방식의 `nocturne.token`은 페이지를 열 때 지운다.
 - 관리 페이지는 `hpotty36.github.io` 출처에서 돈다. 이 계정의 모든 Pages 사이트가 같은 출처라서, 그중 어느 페이지에서 도는 스크립트든 혼자서 로그인을 끝낼 수 있다: 자기 PKCE 값으로 로그인 주소를 팝업으로 열고, 같은 출처인 팝업에서 `?code=`를 읽고, Worker에서 토큰으로 바꾼다 (Worker는 출처만 보니 통과한다). 그 기기 브라우저가 GitHub에 로그인돼 있고 App을 허용한 적이 있으면 아무것도 묻지 않는다. 토큰을 저장하지 않아도 이건 막지 못한다. 그래서 이 출처에는 믿을 수 있는 스크립트만 둔다 (지켜야 할 것). `nocturne.signedIn`도 그 사이트들이 볼 수 있다.

@@ -29,9 +29,9 @@
   </picture>
 </p>
 
-Nocturne is a static photo gallery. Upload a photo from a phone or PC, and an open model on Ollama hangs it in the
-right room with a title and alt text; the site then rebuilds on GitHub Pages. The repository holds everything: no
-database, no paid API.
+Nocturne is a static photo gallery. Upload a photo from a phone or PC, and Claude hangs it in the right room with a
+title and alt text, with open models on Ollama as the fallback; the site then rebuilds on GitHub Pages. The
+repository holds everything; there is no database.
 
 ## Highlights
 
@@ -39,7 +39,7 @@ database, no paid API.
 - **Justified rows**: every row fills the width, and prints keep their own aspect ratio. Nothing is cropped.
 - **Viewing room**: click any print to see it large; arrow keys, swipe and Esc work as you expect.
 - **Upload and walk away**: pick a photo on any phone or PC. The AI picks the room, writes the title and alt text, and publishes at once. Fix it later if you like.
-- **No paid APIs**: Ollama on a home PC (gemma4 12B), or GitHub Actions (gemma4 e4b) when the PC is off. The 12B quietly rewrites e4b's text later.
+- **Claude first, Ollama as backup**: GitHub Actions drafts with Claude Opus 5.5 on the Claude API, paid from the API credits of a Claude subscription. If Claude can't, gemma4 e4b on Ollama takes over in the same run; if Actions can't run at all, a home PC (gemma4 12B) picks the photo up after 5 minutes. The 12B quietly rewrites e4b's text later.
 - **People win**: the AI never changes a title, description or room that a person has edited.
 - **Privacy**: metadata is stripped in the browser before upload, and GPS is never read.
 - **GitHub login**: a GitHub App with PKCE and a tiny Cloudflare Worker. The token lives in page memory only and is never stored.
@@ -47,16 +47,20 @@ database, no paid API.
 
 ## How it works
 
-The admin page shrinks the photo, strips its metadata and commits it to `queue/`. Whichever AI claims it first drafts
-the room, title and alt text, then publishes everything in one commit. The `site.yml` workflow rebuilds the site.
+The admin page shrinks the photo, strips its metadata and commits it to `queue/`. GitHub Actions claims it at once
+and has Claude draft the room, title and alt text; a photo Claude can't do goes to gemma4 e4b in the same run. A
+photo nobody has claimed after 5 minutes goes to the home PC helper. Each draft is published in one commit, and the
+`site.yml` workflow rebuilds the site.
 
 ```mermaid
 flowchart LR
   A["Admin page<br/>strip metadata, resize"] -->|"one commit"| Q[("queue/")]
-  Q -->|"every 20 s"| PC["Home PC helper<br/>Ollama, gemma4 12B"]
-  Q -->|"after 60 s, if unclaimed"| GH["GitHub Actions<br/>Ollama, gemma4 e4b"]
-  PC -->|"one commit"| P["photos.json + photos/"]
-  GH -->|"one commit"| P
+  Q -->|"at once"| C["GitHub Actions<br/>Claude API, Opus 5.5"]
+  C -->|"if Claude fails, same run"| E["GitHub Actions<br/>Ollama, gemma4 e4b"]
+  Q -->|"after 5 min, if unclaimed"| PC["Home PC helper<br/>Ollama, gemma4 12B"]
+  C -->|"one commit"| P["photos.json + photos/"]
+  E -->|"one commit"| P
+  PC -->|"one commit"| P
   P --> S["site.yml"] --> G["GitHub Pages"]
 ```
 
@@ -81,8 +85,8 @@ sequenceDiagram
 | Part | What it uses |
 |:---|:---|
 | Frontend | Plain HTML, CSS and JavaScript. The admin page is vanilla ES modules: no framework, no bundler, strict CSP |
-| Scripts | Python 3 + Pillow: site build, photo prep, AI worker, home PC helper |
-| AI | Ollama with gemma4 12B (home PC) and gemma4 e4b (GitHub Actions) |
+| Scripts | Python 3 + Pillow (+ the `anthropic` SDK on Actions): site build, photo prep, AI worker, home PC helper |
+| AI | Claude API with Claude Opus 5.5 (GitHub Actions); Ollama as the fallback, with gemma4 e4b (GitHub Actions) and gemma4 12B (home PC) |
 | Hosting | GitHub Pages, deployed by GitHub Actions |
 | Auth | GitHub App (user tokens, PKCE) + a Cloudflare Worker for the code exchange |
 | Tests | Python `unittest` and the Node test runner, with a fake GitHub server |
@@ -97,7 +101,7 @@ py -m unittest discover -s tests -v        # Python tests
 node --test "tests/js/*.test.js"           # JS tests (Node 24)
 ```
 
-`py` is the Windows Python launcher; use `python3` elsewhere. The tests need no network and no Ollama.
+`py` is the Windows Python launcher; use `python3` elsewhere. The tests need no network, no Ollama and no Claude API key.
 To try the admin page without touching the real repository, run it against the bundled fake GitHub server: see
 [CLAUDE.md](CLAUDE.md#관리-페이지를-컴퓨터에서만-시험하기) (in Korean).
 
