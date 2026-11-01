@@ -65,7 +65,10 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("if: steps.check.outputs.names != ''", self.step(t, name), name)
         ollama = self.step(t, "e4b로 초안 쓰고 게시")
         self.assertIn("id: run", ollama)
-        self.assertIn("run: python scripts/worker.py --by github --run --ai ollama", ollama)
+        # only what was left when the check ran: a photo that lands while Ollama is set up waits for the next run's
+        # Claude pass (its own push has already queued that run)
+        self.assertIn('run: python scripts/worker.py --by github --run --ai ollama --only "${{ steps.check.outputs.names }}"',
+                      ollama)
         self.assertNotIn("continue-on-error", ollama)
     def test_draft_gating(self):
         t = self.text(".github/workflows/draft.yml")

@@ -116,12 +116,14 @@ jobs:
           key: ollama-gemma4-e4b-it-qat
 
       # Claude 단계가 못 쓴 사진은 여기서 실패하면 failed가 된다 (사람이 새 사진 탭에서 다시 시도)
+      # 남은 사진 찾기 때 있던 사진만 쓴다. Ollama를 준비하는 사이에 올라온 사진은 다음 실행의 Claude 단계가 쓴다
+      # (그 사진의 올림 push로 다음 실행이 이미 줄 서 있다)
       - name: e4b로 초안 쓰고 게시
         id: run
         if: steps.check.outputs.names != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/worker.py --by github --run --ai ollama
+        run: python scripts/worker.py --by github --run --ai ollama --only "${{ steps.check.outputs.names }}"
 
       # GITHUB_TOKEN으로 만든 push는 다른 워크플로를 시작하지 않으므로 직접 부른다
       # (Claude 단계나 e4b 단계 중 하나라도 게시했으면)

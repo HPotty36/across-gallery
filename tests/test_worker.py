@@ -46,6 +46,20 @@ class FakeClaude:
         return {"room": "night", "title": "클로드 초안", "alt": "클로드 설명", "confidence": 0.9, "model": self.answered_by}
 
 
+class UploadingClaude(FakeClaude):
+    """A FakeClaude during whose first `uploads` calls a new photo lands in the queue (`upload(n)` puts it there), as
+    when the admin page commits a batch one photo at a time while the Claude pass runs."""
+
+    def __init__(self, upload, uploads):
+        super().__init__()
+        self.upload, self.uploads = upload, uploads
+
+    def __call__(self, image, data, grayscale, *, model=None):
+        if len(self.asked) < self.uploads:
+            self.upload(len(self.asked))
+        return super().__call__(image, data, grayscale, model=model)
+
+
 def recording(seen):
     """A drafter that notes what it was given (reading the image file while it exists) before FakeAI answers."""
     def drafter(image, data, grayscale, *, model=None):
@@ -838,6 +852,60 @@ class MainTests(FakeRepo, unittest.TestCase):
         self.put_item("f")  # the e4b pass records its AI failure for a person, as before
         code, printed, _ = self.run_main("--by", "github", "--run", "--ai", "ollama", drafter=FakeAI(fail=True))
         self.assertEqual((code, printed, self.item("f")["status"]), (0, "failed: f\n", "failed"))
+
+    # --- uploads that land while a pass runs ---
+
+    def late(self, n):
+        """A photo uploaded while the pass runs (the admin page commits a batch one photo at a time)."""
+        self.put_item(f"late{n}", uploaded_at=queue_items.iso(NOW + timedelta(seconds=120)))
+
+    def test_the_claude_pass_drafts_an_upload_that_lands_while_it_runs(self):
+        self.put_item("a")
+        claude = UploadingClaude(self.late, 1)
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", claude=claude)
+        self.assertEqual((code, output), (0, "earlier=1\npublished=2\n"))
+        self.assertEqual(printed.splitlines(), ["published: a", "published: late0"])
+        self.assertEqual(claude.asked, ["claude-opus-5-5", "claude-opus-5-5"])
+        for name in ("a", "late0"):
+            self.assertEqual(photolib.find_photo(self.photos(), name)[1]["ai"]["model"], "claude-opus-5-5")
+            self.assertEqual(self.queue_files(name), [])
+    def test_the_claude_pass_ends_once_nothing_new_lands(self):
+        self.put_item("a")
+        claude = UploadingClaude(self.late, 2)  # a brings late0, late0 brings late1, late1 brings nothing
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", claude=claude)
+        self.assertEqual((code, output), (0, "earlier=1\npublished=3\n"))
+        self.assertEqual(printed.splitlines(), ["published: a", "published: late0", "published: late1"])
+        self.assertEqual(len(claude.asked), 3)
+    def test_the_claude_pass_takes_each_item_at_most_once(self):
+        # handed off, the item is waiting again; the pass must not take it a second time (nor loop on it forever)
+        self.put_item("a")
+        claude = FakeClaude(fail="알 수 없는 실패")
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", claude=claude)
+        self.assertEqual((code, output, claude.asked), (0, "earlier=1\npublished=0\n", ["claude-opus-5-5"]))
+        self.assertEqual(printed.splitlines()[0], "handed off: a")
+        self.assertEqual(self.item("a")["status"], "waiting")
+    def test_the_ollama_pass_takes_only_what_it_was_given(self):
+        self.put_item("a"); self.put_item("b")
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "ollama", "--only", "a,zz")
+        self.assertEqual((code, printed, output), (0, "published: a\n", "earlier=1\npublished=1\n"))
+        self.assertEqual((self.queue_files("a"), self.item("b")["status"]), ([], "waiting"))
+    def test_only_nothing_takes_nothing(self):
+        self.put_item("a")
+        before = self.fake.commits(R)
+        for ai in ("ollama", "claude"):
+            with self.subTest(ai):
+                code, printed, output = self.run_main("--by", "github", "--run", "--ai", ai, "--only", "", claude=FakeClaude())
+                self.assertEqual((code, printed, output.splitlines()[-1]), (0, "", "published=0"))
+        self.assertEqual((self.fake.commits(R), self.item("a")["status"]), (before, "waiting"))
+    def test_only_bounds_the_claude_pass_too(self):
+        self.put_item("a"); self.put_item("b")
+        claude = UploadingClaude(self.late, 1)
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", "--only", "b", claude=claude)
+        self.assertEqual((code, printed, output), (0, "published: b\n", "earlier=1\npublished=1\n"))
+        self.assertEqual((self.item("a")["status"], self.item("late0")["status"]), ("waiting", "waiting"))
+    def test_only_is_for_run(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.run_main("--by", "github", "--check", "--only", "a")
 
 
 if __name__ == "__main__":

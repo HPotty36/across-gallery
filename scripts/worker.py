@@ -15,14 +15,15 @@ the PC hands it back to waiting for GitHub and leaves it alone for RELEASE_SKIP_
 The PC helper also lets the PC model rewrite text that e4b wrote (upgrade_one, curator.UPGRADE_FROM), never
 text by Claude or by the PC model itself, a field a person edited or the room.
 
-    python scripts/worker.py --by github --check [--ai claude]   names this worker may take, comma-separated
-    python scripts/worker.py --by github --run [--ai claude]     processes them all
+    python scripts/worker.py --by github --check [--ai claude]               names this worker may take, comma-separated
+    python scripts/worker.py --by github --run [--ai claude] [--only a,b]   processes them all (or only those named)
 Both use GITHUB_TOKEN. --ai ollama (the default) drafts with the model from NOCTURNE_MODEL and records an AI
 failure; --ai claude drafts with the Claude API (model from NOCTURNE_CLAUDE_MODEL, key from ANTHROPIC_API_KEY),
-hands an AI failure off and prints a ::warning line for it, and without a key takes nothing at all. When
-GITHUB_OUTPUT is set, --check writes names=<comma-separated names> (empty when there is nothing to take) and --run
-writes published=<count>. --run exits 0 when every item was handled, 1 when at least one hit an error (photos it
-published still count).
+hands an AI failure off and prints a ::warning line for it, keeps looking until no new upload has landed, and
+without a key takes nothing at all. --only takes just the named items
+that are takeable now (an empty value: none). When GITHUB_OUTPUT is set, --check writes names=<comma-separated names>
+(empty when there is nothing to take) and --run writes published=<count>. --run exits 0 when every item was handled,
+1 when at least one hit an error (photos it published still count).
 """
 import argparse
 import logging
@@ -374,7 +375,8 @@ def main(argv=None):
     are none) to GITHUB_OUTPUT. --run: process them all and write published=<count>, even when something crashed
     on the way. Exit 0 when every item was handled, 1 when at least one hit an error; published photos still count.
     --ai claude: draft with the Claude API and hand an AI failure off to the next pass, with a ::warning line for the
-    run's page; without ANTHROPIC_API_KEY say so, take nothing, write names= or published=0 and exit 0.
+    run's page, and look again after each round for uploads that landed meanwhile; without ANTHROPIC_API_KEY say so,
+    take nothing, write names= or published=0 and exit 0. --only (with --run): take only those names.
     """
     parser = argparse.ArgumentParser(description="대기열의 사진을 AI 초안으로 바로 게시해요 (GitHub Actions용).")
     parser.add_argument("--by", choices=("pc", "github"), required=True, help="맡는 쪽")
@@ -383,7 +385,10 @@ def main(argv=None):
     action.add_argument("--run", action="store_true", help="맡을 수 있는 항목을 모두 처리")
     parser.add_argument("--ai", choices=("claude", "ollama"), default="ollama",
                         help="초안을 쓰는 AI (claude: 실패한 사진은 다음 단계의 Ollama로 넘김)")
+    parser.add_argument("--only", metavar="NAMES", help="--run에서 이 이름들(쉼표로 구분)만 처리 (빈 값이면 아무것도 안 함)")
     args = parser.parse_args(argv)
+    if args.only is not None and not args.run:
+        parser.error("--only는 --run과 함께 써요")
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         parser.error("GITHUB_TOKEN이 없어요")
@@ -395,31 +400,39 @@ def main(argv=None):
         options = {"model": curator.claude_model_name(), "drafter": curator.claude_draft, "ai_failure": "handoff"}
     else:
         options = {"model": curator.model_name()}
+    only = None if args.only is None else {name.strip() for name in args.only.split(",") if name.strip()}
     with tempfile.TemporaryDirectory(prefix="nocturne-") as tmp:
         worker = Worker(GitHub(token), by=args.by, workdir=tmp, **options)
-        names = worker.takeable()
         if args.check:
+            names = worker.takeable()
             print(",".join(names))
             _set_output(names=",".join(names))
             return 0
-        published, broken = 0, False
+        published, broken, done = 0, False, set()
         try:
-            for name in names:
-                try:
-                    result = worker.process(name)
-                except GitHubError as err:  # the item waits for the stale rule; the others still get their turn
-                    print(f"error: {name}: {err}", file=sys.stderr)
-                    broken = True
-                    continue
-                except Exception as err:  # any other crash that got out of process: the others still get their turn
-                    print(f"error: {name}: {type(err).__name__}: {err}", file=sys.stderr)
-                    traceback.print_exc()
-                    broken = True
-                    continue
-                print(f"{result}: {name}")
-                if result == "handed off":  # on the run's page, so a broken key or used-up credit does not go unseen
-                    print(f"::warning title=Claude::{_command_data(f'{name}: {worker.handoffs[name]}')}")
-                published += result == "published"
+            # The Claude pass looks again after each round, so a photo uploaded while it runs is Claude's too (the admin
+            # page commits a batch one photo at a time). Each item is taken at most once per pass, so the loop ends.
+            # The Ollama pass takes one round: draft.yml gives it, with --only, what was left when the check ran.
+            while names := [name for name in worker.takeable() if name not in done and (only is None or name in only)]:
+                for name in names:
+                    done.add(name)
+                    try:
+                        result = worker.process(name)
+                    except GitHubError as err:  # the item waits for the stale rule; the others still get their turn
+                        print(f"error: {name}: {err}", file=sys.stderr)
+                        broken = True
+                        continue
+                    except Exception as err:  # any other crash that got out of process: the others still get their turn
+                        print(f"error: {name}: {type(err).__name__}: {err}", file=sys.stderr)
+                        traceback.print_exc()
+                        broken = True
+                        continue
+                    print(f"{result}: {name}")
+                    if result == "handed off":  # on the run's page, so a broken key or used-up credit does not go unseen
+                        print(f"::warning title=Claude::{_command_data(f'{name}: {worker.handoffs[name]}')}")
+                    published += result == "published"
+                if args.ai != "claude":
+                    break
         finally:
             _set_output(published=published)  # the site rebuild step needs it even after a crash
         return 1 if broken else 0
