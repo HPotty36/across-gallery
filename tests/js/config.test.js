@@ -11,9 +11,9 @@ test('CONFIG values', () => {
     siteWorkflow: 'site.yml',
     api: 'https://api.github.com',
     pollMs: 15000,
-    clientId: 'Iv23-not-set',
+    clientId: 'Iv23libkbaTkem4iUAf2',
     authorize: 'https://github.com/login/oauth/authorize',
-    exchange: 'https://nocturne-auth.invalid/token',
+    exchange: 'https://nocturne-auth.72chili.workers.dev/token',
   });
 });
 

@@ -7,9 +7,9 @@ export const CONFIG = Object.freeze({
   siteWorkflow: 'site.yml',
   api: 'https://api.github.com',
   pollMs: 15000,
-  clientId: 'Iv23-not-set', // the GitHub App's client ID (public); set at rollout
+  clientId: 'Iv23libkbaTkem4iUAf2', // the GitHub App's client ID (public)
   authorize: 'https://github.com/login/oauth/authorize',
-  exchange: 'https://nocturne-auth.invalid/token', // the Worker that trades a login code for a token; set at rollout
+  exchange: 'https://nocturne-auth.72chili.workers.dev/token', // the Worker that trades a login code for a token (auth/worker.js)
 });
 
 /**
