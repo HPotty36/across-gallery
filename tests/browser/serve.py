@@ -10,7 +10,7 @@ through a browser tool. This server
   - serves the repository root read-only (never cached, so edits show on reload),
   - and accepts exactly one kind of write: PUT /tests/browser/out/<file> saves the request body
     (up to 50 MB) as tests/browser/out/<file>. Nothing else can be written.
-It is not part of the published site: build.py --out copies only photos/ and admin/.
+It is not part of the published site: build.py --out copies only photos/, icons/ and admin/.
 """
 import argparse
 import os

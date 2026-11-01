@@ -141,12 +141,15 @@ def make_exif_jpeg(path, byteorder):
 
 
 def make_site(tmp):
-    """Small site tree under tmp: the real template, SITE as photos.json, and a JPEG pair per photo."""
+    """Small site tree under tmp: the real template, service worker and icons, SITE as photos.json, and a JPEG
+    pair per photo."""
     import photolib
 
     tmp = Path(tmp)
     (tmp / "src").mkdir(parents=True, exist_ok=True)
-    shutil.copy(ROOT / "src" / "template.html", tmp / "src" / "template.html")
+    for name in ("template.html", "sw.js"):
+        shutil.copy(ROOT / "src" / name, tmp / "src" / name)
+    shutil.copytree(ROOT / "icons", tmp / "icons", dirs_exist_ok=True)
     (tmp / "src" / "photos.json").write_text(photolib.dumps_data(SITE), encoding="utf-8", newline="\n")
     for room in SITE["rooms"]:
         for photo in room["photos"]:

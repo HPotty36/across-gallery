@@ -1,12 +1,14 @@
 # Nocturne — 사진 전시 사이트
 
-직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명(한국어와 영어)을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. AI는 GitHub Actions에서 Claude API(`claude-opus-5-5`, Max 요금제에 딸린 API 크레딧으로)를 쓴다. Claude가 못 쓰면 같은 실행에서 Ollama의 e4b가, Actions가 돌지 못하면 집 PC의 Ollama(12B)가 대신 쓴다. 사이트는 `index.html`(한국어)과 `en/index.html`(영어), `photos/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
+직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명(한국어와 영어)을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. AI는 GitHub Actions에서 Claude API(`claude-opus-5-5`, Max 요금제에 딸린 API 크레딧으로)를 쓴다. Claude가 못 쓰면 같은 실행에서 Ollama의 e4b가, Actions가 돌지 못하면 집 PC의 Ollama(12B)가 대신 쓴다. 사이트는 `index.html`(한국어)과 `en/index.html`(영어), 설치와 오프라인용 `manifest.webmanifest`·`sw.js`, `photos/`, `icons/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
 
 ## 구조
 
 ```
 src/template.html        페이지 뼈대: CSS(디자인 토큰), 마크업, JS(정렬 레이아웃, 크게 보기)
 src/photos.json          사이트 문구, 대표 사진, 방 목록, 사진별 제목·대체 텍스트·날짜·카메라·ai (정규 형식, 아래)
+src/sw.js                서비스 워커 틀: 오프라인 캐시 규칙 (설치와 오프라인). 빌드가 VERSION과 PHOTOS를 채워 sw.js로 쓴다
+icons/                   설치 아이콘 넷 (192, 512, maskable 512, apple-touch 180). 손으로 만든 것, 자동으로 다시 만들지 않는다
 photos/thumb/<name>.jpg  그리드용, 긴 변 1000px
 photos/full/<name>.jpg   크게 보기·대표 사진용, 긴 변 2400px
 queue/<name>/            대기 중인 업로드: full.jpg, thumb.jpg, item.json. 게시되면 폴더째 지워진다.
@@ -19,7 +21,8 @@ admin/                   관리 페이지 (정적, 외부 스크립트 없음)
 auth/worker.js           Cloudflare Worker: 관리 페이지 로그인 코드를 토큰으로 바꿔 준다 (대시보드에 붙여 넣음)
 scripts/
   photolib.py            이름 규칙, EXIF 힌트, 흑백 판별, 메타데이터 없는 사본, photos.json 읽기·쓰기, ai 함수
-  build.py               template + photos.json -> index.html (한국어)와 en/index.html (영어). --out 이면 _site 조립
+  build.py               template + photos.json -> index.html (한국어)와 en/index.html (영어), 옆에 manifest.webmanifest와
+                         sw.js. --out 이면 _site 조립 (photos/, icons/, admin/ 복사)
   prepare_photos.py      originals/ 의 원본을 웹용 사본으로 변환 (명령줄 흐름)
   curator.py             Claude API나 Ollama에게 방·제목·설명(한국어와 영어) 초안 요청, 확신도, alt 후처리
   queue_items.py         item.json 형식과 누가 맡을 수 있는지 규칙
@@ -33,7 +36,8 @@ scripts/
 tests/                   Python unittest, tests/js (node), fake_github.py(가짜 GitHub), browser/(브라우저 점검)
 docs/superpowers/        설계 문서(specs)와 구현 계획(plans)
 originals/               원본 사진. git에 올리지 않음 (.gitignore)
-index.html, en/index.html  로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
+index.html, en/index.html, manifest.webmanifest, sw.js
+                         로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
 requirements-ai.txt      Claude SDK(anthropic), 버전과 해시로 고정. draft.yml만 설치한다 (사이트 빌드·시험·PC에는 필요 없음)
 README.md / README.ko.md 저장소 첫 화면 소개 (영어 기본 / 한국어, 내용 같음)
 LICENSE                  코드는 MIT (GitHub가 MIT로 알아보게 표준 문구만 둔다)
@@ -44,7 +48,7 @@ NOTICE.md                photos/·queue/의 사진은 MIT가 아님 (모든 권�
 
 ```
 py -m pip install -r requirements.txt            # 처음 한 번 (Pillow)
-py scripts\build.py                              # 로컬 index.html, en/index.html 만들기 (커밋하지 않음)
+py scripts\build.py                              # 로컬 index.html, en/index.html, manifest.webmanifest, sw.js 만들기 (커밋하지 않음)
 py scripts\build.py --out _site                  # Pages에 올라가는 모양 그대로 _site 조립 (시험 뒤 지울 것)
 py tests\browser\serve.py --port 8000            # http://localhost:8000 미리보기
 py -m unittest discover -s tests -v              # Python 시험
@@ -203,7 +207,7 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 - 사이트 어디에도 소유자의 실명을 넣지 않는다. 사이트 이름은 "Nocturne".
 - 저장소와 사이트에 들어가는 사진은 반드시 메타데이터를 지운 사본이다 (관리 페이지의 브라우저 변환 또는 `prepare_photos.py`). 원본에는 GPS 위치가 들어 있을 수 있다. `photos/`나 `queue/`에 원본을 직접 복사하지 말 것.
 - 저장소가 공개라서 올린 파일은 누구나 볼 수 있다. 대기 중인 사진은 `queue/`에서 몇 분간 공개 상태로 머물고, 버리거나 전시에서 빼도 git 기록에는 남는다. 원본(`originals/`)은 `.gitignore`로 제외되어 있다.
-- `index.html`과 `en/index.html`은 Actions가 만든다. 커밋하지 않는다 (`.gitignore`는 루트의 `/index.html`과 `/en/`만 막는다).
+- `index.html`, `en/index.html`, `manifest.webmanifest`, `sw.js`는 Actions가 만든다. 커밋하지 않는다 (`.gitignore`는 루트의 `/index.html`, `/en/`, `/manifest.webmanifest`, `/sw.js`만 막는다).
 - 장소 이름은 확인된 것만 쓴다. 사진만 보고 추측한 장소를 제목이나 설명에 넣지 않는다 (AI 프롬프트에도 쓰지 말라고 넣어 두었다. 잘못 들어가면 전시 중 탭에서 고친다).
 - `alt`는 화면 낭독기용 설명이다. 무엇이 찍혔는지 한 문장으로, 흑백이면 끝에 "흑백 사진"을 덧붙인다. 영어 `alt_en`은 같은 규칙으로 끝에 ", black-and-white photo"를 덧붙인다.
 - 문구는 한국어, 짧고 평이하게.
@@ -237,12 +241,22 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 - 관리 페이지는 375px 폭에서 쓸 수 있어야 한다. CSP 때문에 인라인 스크립트·스타일을 쓰지 않는다.
 - 사이트의 "관리"(작은 글씨, `--ink-dim`, 누구에게나 보임)는 관리 페이지로 가고, 관리 페이지 위쪽의 "Nocturne"은 사이트를 새 탭에 연다.
 
+## 설치와 오프라인
+
+- 사이트는 폰 홈 화면에 앱처럼 설치할 수 있다 (`manifest.webmanifest`, `icons/`). 안드로이드 Chrome: ⋮ 메뉴 → "앱 설치"(또는 "홈 화면에 추가"). 아이폰 Safari: 공유 → "홈 화면에 추가". 설치한 앱은 사이트 루트(`./`)로 열리고, 기억한 언어로 간다.
+- 서비스 워커(`sw.js`, 틀은 `src/sw.js`)는 처음 연 기기에 두 페이지와 모든 썸네일을 담아 두고, 그 뒤로 받는 글꼴·대표 사진·크게 본 원본도 담는다. 그래서 두 번째로 연 뒤부터는 네트워크 없이도 전시가 다 열린다. 크게 본 적 없는 사진은 오프라인에서 썸네일 크기에 머문다. 한 번도 열지 않은 기기는 오프라인에서 열리지 않는다.
+- 페이지는 늘 네트워크를 먼저 본다. 4초 안에 제대로 된 답이 오면 그것을 쓰고 담아 둔 사본도 바꾼다. 네트워크가 없거나 4초가 넘거나 404·500 같은 오류면 담아 둔 사본을 보여 준다. 오류 페이지는 담지 않는다.
+- 새 버전: 빌드가 `sw.js`의 `VERSION`을 두 페이지·manifest·`src/sw.js` 틀의 해시로 정하므로, 사이트가 바뀌면 다음에 온라인으로 열 때 새 서비스 워커가 들어와 바로 바뀐다 (새 사진의 썸네일을 받고, 전시에서 빠졌거나 바뀐 사진은 기기에서도 지운다). 페이지 자체는 그 열기에서 이미 새것이다.
+- 캐시는 `nocturne-page`(두 페이지, manifest, 아이콘), `nocturne-thumbs`, `nocturne-full`, `nocturne-fonts` 넷이다. 사진 주소의 `?v=` 해시 덕분에 같은 이름으로 바뀐 사진도 옛것이 나오지 않는다.
+- 관리 페이지(`admin/`, 로그인 뒤 돌아오는 `admin/?code=…` 포함)는 서비스 워커가 건드리지 않는다. 같은 범위 안에 있지만 그 주소는 늘 네트워크로 간다. 관리 페이지가 부르는 Google Fonts만 사이트 글꼴과 같은 규칙(`nocturne-fonts`)을 거친다.
+- `index.html`을 파일로 바로 열면 서비스 워커 없이 동작한다. `localhost:8000` 미리보기에서는 등록된다 (`localhost:8000` 아래 모든 페이지가 같은 출처라 캐시도 함께 쓴다). 지우려면 개발자 도구 → Application → Service workers → Unregister, 그리고 Storage → Clear site data.
+
 ## 배포
 
 - 저장소: https://github.com/HPotty36/nocturne (공개)
 - 사이트: https://hpotty36.github.io/nocturne/
 - 관리 페이지: https://hpotty36.github.io/nocturne/admin/
-- GitHub Pages는 Actions로 배포한다 (`build_type=workflow`). `main`에 `src/**`, `photos/**`, `admin/**`, `scripts/build.py`, `scripts/photolib.py`, `requirements.txt`가 바뀌어 push되면 `site.yml`이 `build.py --out _site`로 `index.html`, `en/index.html`, `photos/`, `admin/`만 올린다 (1~2분). 문서만 바뀐 push는 다시 만들지 않는다. 수동 실행은 `gh workflow run site.yml`. `queue/`, `src/`, `scripts/`, `tests/`, `auth/`는 사이트로 서빙되지 않는다 (`auth/worker.js`는 Cloudflare에 손으로 붙여 넣는다).
+- GitHub Pages는 Actions로 배포한다 (`build_type=workflow`). `main`에 `src/**`, `photos/**`, `admin/**`, `icons/**`, `scripts/build.py`, `scripts/photolib.py`, `requirements.txt`가 바뀌어 push되면 `site.yml`이 `build.py --out _site`로 `index.html`, `en/index.html`, `manifest.webmanifest`, `sw.js`, `photos/`, `icons/`, `admin/`만 올린다 (1~2분). 문서만 바뀐 push는 다시 만들지 않는다. 수동 실행은 `gh workflow run site.yml`. `queue/`, `src/`, `scripts/`, `tests/`, `auth/`는 사이트로 서빙되지 않는다 (`auth/worker.js`는 Cloudflare에 손으로 붙여 넣는다).
 - `.nojekyll`은 Actions 배포에서는 필요 없지만 두어도 해롭지 않다.
 - 저장소 이름을 `across-gallery`에서 `nocturne`으로 바꿨기 때문에 옛 주소(`hpotty36.github.io/across-gallery/`)는 열리지 않는다. 이동 안내는 두지 않았다.
 

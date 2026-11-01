@@ -17,6 +17,11 @@ class WorkflowTests(unittest.TestCase):
                   "group: pages"):
             self.assertIn(s, t)
         self.assertNotIn("queue/**", t)
+    def test_site_rebuilds_for_its_files(self):
+        t = self.text(".github/workflows/site.yml")
+        paths = t[t.index("    paths:\n"):t.index("  workflow_dispatch:")]
+        self.assertEqual(re.findall(r'^      - "([^"]+)"$', paths, re.M),
+                         ["src/**", "photos/**", "admin/**", "icons/**", "scripts/build.py", "scripts/photolib.py", "requirements.txt"])
     def test_draft(self):
         t = self.text(".github/workflows/draft.yml")
         for s in ("queue/**", "cron:", "workflow_dispatch", "contents: write", "actions: write", "group: draft",

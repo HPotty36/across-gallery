@@ -7,6 +7,7 @@ on:
       - "src/**"
       - "photos/**"
       - "admin/**"
+      - "icons/**"
       - "scripts/build.py"
       - "scripts/photolib.py"
       - "requirements.txt"

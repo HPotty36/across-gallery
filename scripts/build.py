@@ -2,9 +2,10 @@
 
 Usage:  python scripts/build.py [--out DIR]      (Windows: py scripts\\build.py)
 
-Without --out the pages are written to index.html and en/index.html at the project root. With --out
-they go to DIR and photos/ (and admin/, if present) are copied next to them, which is the folder
-GitHub Pages publishes.
+Next to the pages it writes manifest.webmanifest (for installing the site) and sw.js (src/sw.js with its
+version and photo list filled in). Without --out all of these go to the project root. With --out they go
+to DIR and photos/, icons/ (and admin/, if present) are copied next to them, which is the folder GitHub
+Pages publishes.
 
 Reads each photo's size and average colour from photos/full and photos/thumb,
 so run scripts/prepare_photos.py first for any new photo.
@@ -12,6 +13,7 @@ so run scripts/prepare_photos.py first for any new photo.
 import argparse
 import hashlib
 import html
+import json
 import re
 import shutil
 import sys
@@ -23,7 +25,19 @@ import photolib
 
 ROOT = Path(__file__).resolve().parent.parent
 
-COPIED = ("photos", "admin")  # folders published next to index.html with --out
+COPIED = ("photos", "admin", "icons")  # folders published next to index.html with --out
+
+# manifest.webmanifest: what a phone needs to install the site. The description is site.description with {total}.
+MANIFEST = {
+    "name": "Nocturne", "short_name": "Nocturne", "id": "./", "start_url": "./", "scope": "./", "display": "standalone",
+    "background_color": "#000000", "theme_color": "#000000", "lang": "ko", "description": "",
+    "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+              {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+              {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+}
+
+# The two lines of src/sw.js the build fills in; each must be there exactly once.
+SW_VERSION, SW_PHOTOS = "'__VERSION__'", "[/*__PHOTOS__*/]"
 
 # Screen text per language. `view` and `count` are templates: {title}, {n}.
 STRINGS = {
@@ -208,8 +222,30 @@ def render_page(template, data, facts, lang):
     return re.sub(r"__[A-Z]+__", lambda m: values[m.group(0)], template)
 
 
+def manifest_text(description):
+    """manifest.webmanifest: MANIFEST with the site description (its {total} already filled in)."""
+    return json.dumps({**MANIFEST, "description": description}, ensure_ascii=False, indent=2) + "\n"
+
+
+def sw_text(template, pages, manifest, photos):
+    """sw.js: the src/sw.js template with VERSION and PHOTOS filled in.
+
+    VERSION is the first 12 hex of a sha256 over the Korean page, the English page, the manifest and the template,
+    so the browser takes a new service worker whenever anything on the site changes (and only then). PHOTOS is the
+    {thumb, full} URLs of every photo on show, in page order.
+    """
+    for mark in (SW_VERSION, SW_PHOTOS):
+        if template.count(mark) != 1:
+            raise BuildError(f"src/sw.js 에 {mark} 가 꼭 한 번 있어야 합니다.")
+    digest = hashlib.sha256()
+    for text in (pages["ko"], pages["en"], manifest, template):
+        digest.update(text.encode("utf-8"))
+    return template.replace(SW_VERSION, f"'{digest.hexdigest()[:12]}'").replace(SW_PHOTOS, json.dumps(photos))
+
+
 def build(root, out=None):
-    """Write index.html and en/index.html to root, or to out with photos/ and admin/ copied.
+    """Write index.html, en/index.html, manifest.webmanifest and sw.js to root, or to out with photos/, icons/ and
+    admin/ copied.
 
     Returns {"total": photos on show, "rooms": number of rooms}.
     """
@@ -227,11 +263,17 @@ def build(root, out=None):
                            "thumb": asset_url(root, "thumb", name), "full": asset_url(root, "full", name)}
 
     template = (root / "src" / "template.html").read_text(encoding="utf-8")
+    pages = {lang: render_page(template, data, facts, lang) for lang in PAGES}
+    manifest = manifest_text(data["site"]["description"].format(total=total))
+    photos = [{"thumb": facts[p["file"]]["thumb"], "full": facts[p["file"]]["full"]} for r in rooms for p in r["photos"]]
+    sw = sw_text((root / "src" / "sw.js").read_text(encoding="utf-8"), pages, manifest, photos)
+
     dest = root if out is None else Path(out)
-    for lang, page in PAGES.items():
-        path = dest / page["file"]
+    files = {**{page["file"]: pages[lang] for lang, page in PAGES.items()}, "manifest.webmanifest": manifest, "sw.js": sw}
+    for name, text in files.items():
+        path = dest / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_page(template, data, facts, lang), encoding="utf-8", newline="\n")
+        path.write_text(text, encoding="utf-8", newline="\n")
     if out is not None:
         for folder in COPIED:
             if (root / folder).is_dir():
@@ -241,14 +283,14 @@ def build(root, out=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="src/photos.json 으로 index.html 과 en/index.html 을 만듭니다.")
-    parser.add_argument("--out", type=Path, help="두 페이지와 photos/, admin/ 을 이 폴더에 씁니다")
+    parser.add_argument("--out", type=Path, help="두 페이지, manifest, sw.js 와 photos/, icons/, admin/ 을 이 폴더에 씁니다")
     args = parser.parse_args(argv)
     try:
         result = build(ROOT, args.out)
     except BuildError as e:
         print(e, file=sys.stderr)
         sys.exit(1)
-    print(f"index.html, en/index.html 생성 완료: 사진 {result['total']}점, 방 {result['rooms']}개")
+    print(f"index.html, en/index.html, manifest.webmanifest, sw.js 생성 완료: 사진 {result['total']}점, 방 {result['rooms']}개")
     if args.out is not None:
         print(f"출력 폴더: {args.out}")
 

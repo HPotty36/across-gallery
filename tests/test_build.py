@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import shutil
 import tempfile
@@ -152,11 +153,85 @@ class BuildTests(unittest.TestCase):
         out = Path(tempfile.mkdtemp()) / "_site"
         self.addCleanup(shutil.rmtree, out.parent, ignore_errors=True)
         build.build(self.root, out)
-        for p in ("index.html", "en/index.html", "photos/thumb/a1.jpg", "photos/full/n1.jpg", "admin/index.html"):
+        for p in ("index.html", "en/index.html", "photos/thumb/a1.jpg", "photos/full/n1.jpg", "admin/index.html",
+                  "icons/icon-512.png", "manifest.webmanifest", "sw.js"):
             self.assertTrue((out / p).exists(), p)
-        self.assertFalse((self.root / "index.html").exists())
+        for p in ("index.html", "sw.js", "manifest.webmanifest"):
+            self.assertFalse((self.root / p).exists(), p)
         for p in ("src", "queue"):
             self.assertFalse((out / p).exists(), p)
+
+
+class PwaTests(unittest.TestCase):
+    def setUp(self):
+        self.root = helpers.make_site(Path(tempfile.mkdtemp()))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.out = Path(tempfile.mkdtemp()) / "_site"
+        self.addCleanup(shutil.rmtree, self.out.parent, ignore_errors=True)
+
+    def built(self, name):
+        build.build(self.root, self.out)
+        return (self.out / name).read_text(encoding="utf-8")
+
+    def version(self):
+        return re.search(r"const VERSION = '([0-9a-f]{12})';", self.built("sw.js")).group(1)
+
+    def test_manifest(self):
+        manifest = json.loads(self.built("manifest.webmanifest"))
+        self.assertEqual(manifest, {
+            "name": "Nocturne", "short_name": "Nocturne", "id": "./", "start_url": "./", "scope": "./",
+            "display": "standalone", "background_color": "#000000", "theme_color": "#000000", "lang": "ko",
+            "description": "사진 3점",
+            "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                      {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                      {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}]})
+        for icon in manifest["icons"]:
+            self.assertTrue((self.out / icon["src"]).is_file(), icon["src"])
+
+    def test_sw(self):
+        text = self.built("sw.js")
+        for placeholder in ("__VERSION__", "__PHOTOS__"):
+            self.assertNotIn(placeholder, text)
+        photos = json.loads(re.search(r"const PHOTOS = (\[.*?\]);", text, re.S).group(1))
+        self.assertEqual(photos, [{"thumb": build.asset_url(self.root, "thumb", f), "full": build.asset_url(self.root, "full", f)}
+                                  for f in ("a1", "a2", "n1")])
+        first = self.version()
+        self.assertEqual(self.version(), first)  # the same site gives the same version
+        data = photolib.load_data(self.root); data["rooms"][1]["photos"][0]["title"] = "다른 제목"
+        photolib.save_data(self.root, data)
+        second = self.version()
+        self.assertNotEqual(second, first)
+        data["rooms"][1]["photos"][0]["alt_en"] = "Another payphone"  # only the English page changes
+        photolib.save_data(self.root, data)
+        self.assertNotEqual(self.version(), second)
+
+    def test_sw_template_marks(self):
+        sw = self.root / "src" / "sw.js"
+        text = sw.read_text(encoding="utf-8")
+        for broken in (text.replace("'__VERSION__'", "'x'"), text + "\nconst MORE = [/*__PHOTOS__*/];\n"):
+            sw.write_text(broken, encoding="utf-8")
+            with self.assertRaisesRegex(build.BuildError, "src/sw.js"):
+                build.build(self.root)
+
+    def test_root_build_writes_pwa_files(self):
+        build.build(self.root)
+        for name in ("sw.js", "manifest.webmanifest"):
+            self.assertTrue((self.root / name).is_file(), name)
+
+    def test_head(self):
+        build.build(self.root)
+        ko = (self.root / "index.html").read_text(encoding="utf-8")
+        en = (self.root / "en" / "index.html").read_text(encoding="utf-8")
+        for page, base in ((ko, ""), (en, "../")):
+            for s in (f'<link rel="manifest" href="{base}manifest.webmanifest">', f'<link rel="icon" href="{base}icons/icon-192.png">',
+                      f'<link rel="apple-touch-icon" href="{base}icons/apple-touch-icon.png">',
+                      f"navigator.serviceWorker.register('{base}sw.js')"):
+                self.assertTrue(s in page, s)  # (assertIn would print the whole page)
+
+    def test_gitignore(self):
+        lines = (helpers.ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        for s in ("/sw.js", "/manifest.webmanifest"):
+            self.assertIn(s, lines)
 
 
 class TokenTests(unittest.TestCase):

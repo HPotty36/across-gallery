@@ -8,6 +8,9 @@ __REDIRECT__
 <meta name="description" content="__DESCRIPTION__">
 <title>__TITLE__</title>
 __ALTERNATES__
+<link rel="manifest" href="__BASE__manifest.webmanifest">
+<link rel="icon" href="__BASE__icons/icon-192.png">
+<link rel="apple-touch-icon" href="__BASE__icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400&display=swap" crossorigin>
@@ -537,6 +540,12 @@ __ROOMS__
     if (swiped) { swiped = false; return; }
     if (e.target === stage) close();
   });
+
+  /* ---------- install and offline: sw.js keeps the exhibition on the device (not when opened as a file);
+     if the browser refuses it (storage blocked, say), the page simply works as before ---------- */
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('__BASE__sw.js').catch(function () {});
+  }
 })();
 </script>
 </body>

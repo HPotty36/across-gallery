@@ -6,3 +6,5 @@ Thumbs.db
 _site/
 tests/browser/out/
 /en/
+/sw.js
+/manifest.webmanifest
