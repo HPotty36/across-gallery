@@ -230,11 +230,11 @@ class Worker:
                 changes[f"photos/thumb/{name}.jpg"] = {"sha": blobs["thumb.jpg"]}
             else:
                 photo = _find(current, claimed["file"]) if draft and asked else None
-                # Only a text that is still the one the request was made for is replaced; one a person changed
-                # meanwhile is theirs, so it is not replaced and not marked as AI text.
+                # Only a text that is still the one the request was made for is replaced. A text a person saved
+                # meanwhile differs from it (and has left ai.fields), so it is theirs: not replaced, not marked as AI text.
                 fields = [f for f in photolib.AI_FIELDS if photo and photo.get(f) == asked.get(f)]
                 if not fields:
-                    return changes  # taken down, or all four texts rewritten by a person: only the queue entry goes
+                    return changes  # taken down, or a person changed all four texts meanwhile: only the queue entry goes
                 if photo.get("ai"):
                     photo["ai"]["fields"] = []
                 photolib.apply_ai_text(photo, draft, draft["model"], fields)

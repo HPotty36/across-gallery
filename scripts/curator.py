@@ -80,10 +80,14 @@ def claude_model_name():
 
 # --- prompt and reply ------------------------------------------------------------------------
 
+def _has_english(photo):
+    return bool(photo.get("title_en") and photo.get("alt_en"))
+
+
 def _example(room, photo):
     """One example line: "- [방] 제목 / alt", and " | English title / English alt" after it when the photo has both."""
     line = f"- [{room['name']}] {photo['title']} / {photo['alt']}"
-    if photo.get("title_en") and photo.get("alt_en"):
+    if _has_english(photo):
         line += f" | {photo['title_en']} / {photo['alt_en']}"
     return line
 
@@ -91,10 +95,11 @@ def _example(room, photo):
 def build_prompt(data, reply=PROMPT_REPLY):
     """The instructions for a model; `reply` is the last line, which says how to answer (Ollama and Claude differ)."""
     rooms = data["rooms"]
-    examples = [_example(room, p) for room in rooms for p in room["photos"][:2]]
+    shown = [(room, p) for room in rooms for p in room["photos"][:2]]
     parts = [PROMPT_HEAD, "방:\n" + "\n".join(f"- {r['id']} ({r['name']}): {r['note']}" for r in rooms)]
-    if examples:
-        parts.append("기존 사진의 제목과 alt 예시 (말투를 맞추세요):\n" + "\n".join(examples))
+    if shown:
+        note = ', " | " 뒤는 영어' if any(_has_english(p) for _, p in shown) else ""  # say what " | " means only when it shows
+        parts.append(f"기존 사진의 제목과 alt 예시 (말투를 맞추세요{note}):\n" + "\n".join(_example(r, p) for r, p in shown))
     parts += [PROMPT_RULES, reply]
     return "\n\n".join(parts)
 

@@ -76,7 +76,14 @@ class Helper:
         try:
             done = self.worker.upgrade_one()
         except GitHubError:
-            raise  # GitHub may be back by the next tick: run() logs it in one line and the round goes on
+            # GitHub may be back by the next tick: run() logs it in one line and the round goes on. But if it keeps
+            # refusing (a commit that fails every time), the 12B model would be asked about the same photo on every
+            # tick; so the photo upgrade_one was working on is left alone for the rest of the round, and the next
+            # look (after UPGRADE_EVERY) tries it again. upgrade_file is None when GitHub failed before a photo was
+            # chosen: nothing to leave alone then.
+            if self.worker.upgrade_file is not None:
+                self.worker.skip.add(self.worker.upgrade_file)
+            raise
         except Exception:
             # Something upgrade_one does not expect (a bug, code older than the data it reads): the same photo would
             # fail the same way, with the 12B model asked again, on every tick. Log it once with its traceback, leave

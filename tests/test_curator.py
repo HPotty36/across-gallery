@@ -46,6 +46,13 @@ class PromptTests(unittest.TestCase):
         self.assertIn("[강] 스카이라인 / 강 건너 빌딩\n", p)  # a photo without English has no " | " part
         self.assertNotIn("스카이라인 / 강 건너 빌딩 |", p)
 
+    def test_example_heading_says_the_part_after_the_bar_is_english(self):
+        p = curator.build_prompt(helpers.SITE)
+        self.assertIn('기존 사진의 제목과 alt 예시 (말투를 맞추세요, " | " 뒤는 영어):\n- [강] 스카이라인 / 강 건너 빌딩\n', p)
+        site = {"rooms": [{"id": "r", "name": "방", "note": "n", "photos": [{"file": "p0", "title": "t0", "alt": "a0"}]}]}
+        plain = curator.build_prompt(site)  # no example has English, so there is no " | " to explain
+        self.assertIn("기존 사진의 제목과 alt 예시 (말투를 맞추세요):\n- [방] t0 / a0", plain)
+
     def test_english_example_needs_both_texts(self):
         site = {"rooms": [{"id": "r", "name": "방", "note": "n", "photos": [
             {"file": "p0", "title": "t0", "alt": "a0", "title_en": "T0"},

@@ -87,7 +87,7 @@ class HelperTests(FakeRepo, unittest.TestCase):
             self.assertIsNone(self.h.tick())
         self.assertEqual(broken.call_count, 2)
     def test_an_unexpected_error_after_the_model_answered_skips_that_photo(self):
-        with mock.patch.object(photolib, "apply_ai_text", side_effect=KeyError("title_en")),                 self.assertLogs("nocturne.helper", "ERROR") as logs:
+        with mock.patch.object(photolib, "apply_ai_text", side_effect=KeyError("title_en")), self.assertLogs("nocturne.helper", "ERROR") as logs:
             self.assertEqual(self.h.tick(), "failed:a2")
         self.assertEqual(logs.output[0].splitlines()[0], "ERROR:nocturne.helper:다듬기 중 오류 (a2)")
         self.assertIn("KeyError: 'title_en'", logs.output[0])  # with its traceback
@@ -109,6 +109,36 @@ class HelperTests(FakeRepo, unittest.TestCase):
         with self.assertRaises(GitHubError):  # run() logs it as one line
             self.h.tick()
         self.assertEqual(self.h.tick(), "upgraded:a2")
+    def test_upgrade_github_error_skips_that_photo(self):
+        # GitHub keeps refusing (not a 404): the photo upgrade_one was working on is left alone for the rest of the round
+        def upgrade_one():
+            self.w.upgrade_file = "0001"
+            raise GitHubError("GitHub 500: broken", 500)
+        self.w.upgrade_one = upgrade_one
+        with self.assertRaises(GitHubError):  # run() logs it as one line
+            self.h.tick()
+        self.assertIn("0001", self.w.skip)
+        self.assertTrue(self.h.upgrading)  # the round goes on with the other photos
+    def test_upgrade_github_error_before_a_photo_is_chosen_skips_nothing(self):
+        def upgrade_one():
+            self.w.upgrade_file = None  # GitHub failed while photos.json was read, before any photo was picked
+            raise GitHubError("GitHub 502: bad gateway", 502)
+        self.w.upgrade_one = upgrade_one
+        with self.assertRaises(GitHubError):
+            self.h.tick()
+        self.assertEqual(self.w.skip, set())
+        self.assertTrue(self.h.upgrading)
+    def test_a_github_error_at_the_commit_does_not_ask_the_model_again_every_tick(self):
+        with mock.patch.object(self.w.gh, "commit_files", side_effect=GitHubError("GitHub 500: broken", 500)):
+            with self.assertRaises(GitHubError):
+                self.h.tick()
+            for _ in range(3):
+                self.assertIsNone(self.h.tick())  # a2 is skipped; there is nothing else to upgrade
+        self.assertEqual(self.w.drafter.calls, 1)  # no second 12B call
+        self.assertEqual(self.w.skip, {"a2"})
+        self.clock[0] = NOW + timedelta(minutes=31)  # GitHub is back by the next look: it upgrades a2
+        self.assertEqual(self.h.tick(), "upgraded:a2")
+        self.assertEqual(self.w.drafter.calls, 2)
     def test_failed_queue_item(self):
         # the PC hands an item its AI gave up on back to waiting, for GitHub, and leaves it alone meanwhile
         self.put_item("a"); self.w.drafter = FakeAI(fail=True)
