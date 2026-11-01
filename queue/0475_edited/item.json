@@ -6,8 +6,8 @@
   "date": "2026.10.16",
   "camera": "iPhone 12 Mini · f/1.6 · 1/2618s · ISO 32",
   "grayscale": false,
-  "status": "waiting",
-  "claimed_at": null,
-  "by": null,
+  "status": "github",
+  "claimed_at": "2026-11-01T05:52:18Z",
+  "by": "github",
   "error": null
 }
