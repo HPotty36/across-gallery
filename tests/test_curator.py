@@ -356,6 +356,8 @@ class ClaudeDraftTests(unittest.TestCase):
         got, client = self.draft()
         self.assertEqual(len(client.calls), 1)
         kw = client.calls[0]
+        self.assertEqual(set(kw), {"model", "max_tokens", "betas", "fallbacks", "output_config", "messages"})
+        self.assertEqual(set(kw["output_config"]), {"effort", "format"})
         self.assertEqual((kw["model"], kw["max_tokens"]), ("claude-opus-5-5", 16000))
         self.assertEqual(kw["betas"], ["server-side-fallback-2026-07-01"])
         self.assertEqual(kw["fallbacks"], "default")
@@ -363,6 +365,9 @@ class ClaudeDraftTests(unittest.TestCase):
         self.assertEqual(kw["output_config"]["format"]["type"], "json_schema")
         schema = kw["output_config"]["format"]["schema"]
         self.assertEqual(schema["properties"]["room"]["enum"], [room["id"] for room in helpers.SITE["rooms"]])
+        self.assertEqual(set(schema["properties"]), {"room", "title", "alt", "confidence"})
+        self.assertEqual({key: schema["properties"][key]["type"] for key in schema["properties"]},
+                         {"room": "string", "title": "string", "alt": "string", "confidence": "number"})
         self.assertEqual(schema["required"], ["room", "title", "alt", "confidence"])
         self.assertIs(schema["additionalProperties"], False)
         self.assertNotIn("thinking", kw)  # Opus 5.5 always thinks and rejects the parameter
