@@ -17,39 +17,34 @@
 </div>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screen-desktop-dark.jpg">
-    <source media="(prefers-color-scheme: light)" srcset=".github/assets/screen-desktop-light.jpg">
-    <img alt="컴퓨터 화면의 Nocturne: 네 방이 적힌 얇은 상단 바, 그 아래 강을 찍은 넓은 흑백 대표 사진과 라벨" src=".github/assets/screen-desktop-dark.jpg" width="73%">
-  </picture>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/screen-phone-dark.jpg">
-    <source media="(prefers-color-scheme: light)" srcset=".github/assets/screen-phone-light.jpg">
-    <img alt="폰 화면의 Nocturne: 대표 사진, 소개 문장, 강 방의 첫머리" src=".github/assets/screen-phone-dark.jpg" width="21%">
-  </picture>
+  <img alt="컴퓨터 화면의 Nocturne: 왼쪽 좁은 열에 사이트 이름과 네 방의 이름, 오른쪽에 강을 찍은 넓은 흑백 대표 사진과 라벨" src=".github/assets/screen-desktop-dark.jpg" width="73%">
+  <img alt="폰 화면의 Nocturne: 사이트 이름, 언어 링크, 방 목록이 있는 위 줄, 그 아래 대표 사진과 강 방의 첫머리" src=".github/assets/screen-phone-dark.jpg" width="21%">
 </p>
 
 Nocturne은 정적 사진 전시 사이트입니다. 폰이나 PC에서 사진을 올리면 Claude가 방을 고르고 제목과 대체 텍스트를
-써서 걸고(Claude가 못 쓰면 Ollama에서 도는 공개 모델이 대신 씁니다), 사이트는 GitHub Pages에서 다시 만들어집니다.
-모든 것이 저장소에 있습니다. 데이터베이스는 없습니다.
+한국어와 영어로 써서 걸고(Claude가 못 쓰면 Ollama에서 도는 공개 모델이 대신 씁니다), 사이트는 GitHub Pages에서
+다시 만들어집니다. 모든 것이 저장소에 있습니다. 데이터베이스는 없습니다.
 
 ## 특징
 
-- **네 개의 방**: 강, 경기장, 밤, 순간. 방마다 짧은 소개가 있고, 사진마다 아래에 라벨이 붙습니다.
+- **네 개의 방**: 강, 경기장, 밤, 순간. 방 이름 옆에 사진 수와 기간이 붙고, 사진마다 아래에 "제목, 날짜" 라벨이 붙습니다.
 - **꽉 찬 행**: 모든 행이 가로폭을 채우고, 사진은 원래 비율 그대로입니다. 잘리지 않습니다.
-- **크게 보기**: 사진을 누르면 크게 봅니다. 방향키, 스와이프, Esc가 됩니다.
-- **올리고 잊기**: 폰이나 PC에서 사진을 고르면 AI가 방을 고르고 제목과 대체 텍스트를 써서 바로 게시합니다. 고칠 것은 나중에 고칩니다.
+- **크게 보기**: 사진을 누르면 검은 화면에 크게 봅니다. 방향키, 스와이프, Esc가 됩니다.
+- **검은 방, 글꼴 하나**: 완전한 검정 바탕에 글꼴은 Noto Serif KR 하나만 씁니다. 강조색은 없습니다.
+- **한국어와 영어**: 토글로 페이지를 바꾸고, 고른 언어를 기억합니다.
+- **설치와 오프라인**: 폰에 설치할 수 있고, 온라인으로 한 번 열고 나면 오프라인에서도 열립니다.
+- **올리고 잊기**: 폰이나 PC에서 사진을 고르면 AI가 방을 고르고 제목과 대체 텍스트를 한국어와 영어로 써서 바로 게시합니다. 고칠 것은 나중에 고칩니다.
 - **Claude가 먼저, Ollama는 예비**: GitHub Actions가 Claude API의 Claude Opus 5.5로 씁니다. 비용은 Claude 구독에 딸린 API 크레딧에서 나갑니다. Claude가 못 쓰면 같은 실행에서 Ollama의 gemma4 e4b가 이어 쓰고, Actions가 아예 돌지 못하면 5분 뒤 집 PC(gemma4 12B)가 맡습니다. e4b가 쓴 글은 나중에 12B가 조용히 다시 씁니다.
 - **사람이 먼저**: 사람이 고친 제목, 설명, 방은 AI가 다시 바꾸지 않습니다.
 - **개인정보**: 메타데이터는 올리기 전에 브라우저에서 지웁니다. GPS는 읽지 않습니다.
 - **GitHub 로그인**: GitHub App과 PKCE, 작은 Cloudflare Worker. 토큰은 페이지 메모리에만 있고 어디에도 저장하지 않습니다.
-- **밝은 테마와 어두운 테마**: 시스템 설정을 따릅니다. 크게 보기 화면은 둘 다 어둡습니다.
 
 ## 동작 방식
 
 관리 페이지가 사진을 줄이고 메타데이터를 지워 `queue/`에 커밋합니다. GitHub Actions가 바로 맡고 Claude가 방,
-제목, 대체 텍스트를 씁니다. Claude가 못 쓴 사진은 같은 실행에서 gemma4 e4b가 씁니다. 5분이 지나도 아무도 맡지 않은
-사진은 집 PC 도우미가 맡습니다. 초안은 한 커밋으로 게시되고, `site.yml` 워크플로가 사이트를 다시 만듭니다.
+제목, 대체 텍스트(한국어와 영어)를 씁니다. Claude가 못 쓴 사진은 같은 실행에서 gemma4 e4b가 씁니다. 5분이 지나도
+아무도 맡지 않은 사진은 집 PC 도우미가 맡습니다. 초안은 한 커밋으로 게시되고, `site.yml` 워크플로가 사이트를 다시
+만듭니다: `index.html`(한국어)과 `en/index.html`(영어), 설치와 오프라인을 위한 웹 매니페스트와 서비스 워커입니다.
 
 ```mermaid
 flowchart LR
@@ -83,8 +78,9 @@ sequenceDiagram
 
 | 부분 | 쓰는 것 |
 |:---|:---|
-| 프런트엔드 | HTML, CSS, JavaScript 그대로. 관리 페이지는 ES 모듈만 씁니다: 프레임워크·번들러 없음, 엄격한 CSP |
-| 스크립트 | Python 3 + Pillow(Actions에서는 `anthropic` SDK도): 사이트 빌드, 사진 변환, AI 작업, 집 PC 도우미 |
+| 프런트엔드 | HTML, CSS, JavaScript 그대로, Google Fonts의 명조 글꼴 하나. 관리 페이지는 ES 모듈만 씁니다: 프레임워크·번들러 없음, 엄격한 CSP |
+| 오프라인 | 웹 매니페스트와 서비스 워커(`sw.js`)가 페이지, 썸네일, 대표 사진을 담아 둬서 온라인으로 한 번 연 뒤에는 오프라인에서도 열립니다. 관리 페이지는 담지 않습니다 |
+| 스크립트 | Python 3 + Pillow(Actions에서는 `anthropic` SDK도): 사이트 빌드(`index.html`, `en/index.html`, 매니페스트, `sw.js`를 씁니다), 사진 변환, AI 작업, 집 PC 도우미 |
 | AI | Claude API의 Claude Opus 5.5(GitHub Actions). 예비로 Ollama, gemma4 e4b(GitHub Actions)와 gemma4 12B(집 PC) |
 | 호스팅 | GitHub Pages, GitHub Actions로 배포 |
 | 인증 | GitHub App(사용자 토큰, PKCE) + 코드 교환용 Cloudflare Worker |
@@ -94,7 +90,7 @@ sequenceDiagram
 
 ```sh
 py -m pip install -r requirements.txt      # 처음 한 번 (Pillow)
-py scripts/build.py                        # index.html 만들기 (커밋하지 않음)
+py scripts/build.py                        # index.html, en/index.html 만들기 (커밋하지 않음)
 py tests/browser/serve.py --port 8000      # http://localhost:8000 미리보기
 py -m unittest discover -s tests -v        # Python 시험
 node --test "tests/js/*.test.js"           # JS 시험 (Node 24)
@@ -107,7 +103,8 @@ node --test "tests/js/*.test.js"           # JS 시험 (Node 24)
 ## 저장소 구성
 
 ```
-src/          페이지 뼈대, photos.json (방, 제목, 대체 텍스트)
+src/          페이지 뼈대, 서비스 워커 틀, photos.json (방, 제목, 대체 텍스트: 한국어와 영어)
+icons/        사이트를 설치할 때 쓰는 앱 아이콘
 photos/       게시된 사본: thumb/ (1000px), full/ (2400px)
 queue/        AI를 기다리는 업로드 (기다리는 동안만 있음)
 admin/        관리 페이지: 올리기, 확인, 고치기 (정적 ES 모듈)
