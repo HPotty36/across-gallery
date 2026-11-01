@@ -189,7 +189,7 @@ h2 { font: inherit; }
     margin-inline: calc(var(--bleed) * -1);  /* the padding is room for the bullet and focus rings only: the text stays put */
     overflow-y: auto;  /* a low window or many rooms: this column scrolls, so its fine print is never cut off */
     scrollbar-width: thin;
-    scrollbar-color: var(--rule) transparent;
+    scrollbar-color: var(--ink-dim) transparent;
   }
   .mark, .lang { margin-right: 0; padding-block: 0; }
   .side nav, .lang { order: 0; }
@@ -456,7 +456,7 @@ __ROOMS__
       document.addEventListener(type, function () { pressing = false; });
     });
     menu.addEventListener('focusout', function (e) {
-      if (!pressing && menu.open && !menu.contains(e.relatedTarget)) fold();
+      if (!pressing && menu.open && !menu.contains(e.relatedTarget) && document.hasFocus()) fold();
     });
   }
 

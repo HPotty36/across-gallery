@@ -234,7 +234,7 @@ def icon_files(root):
     folder = Path(root) / "icons"
     if not folder.is_dir():
         return []
-    return [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in sorted(folder.rglob("*")) if p.is_file()]
+    return [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in sorted(folder.rglob("*"), key=lambda p: p.relative_to(folder).as_posix()) if p.is_file()]
 
 
 def sw_text(template, pages, manifest, photos, cover, icons=()):
