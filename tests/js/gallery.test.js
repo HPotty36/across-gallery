@@ -219,8 +219,10 @@ test('saveEdits with no change still drops the confidence ("seen by a person")',
 test('saveEdits keeps untouched key order and leaves photos without ai alone', () => {
   const d = site();
   saveEdits(d, 'n1', { title: '전화', alt: '부스', room: 'night' });
-  assert.deepEqual(Object.keys(d.rooms[1].photos[0]), ['file', 'title', 'alt', 'date']);
-  assert.deepEqual(d.rooms[1].photos[0], { file: 'n1', title: '전화', alt: '부스', date: '2025.11.30' });
+  assert.deepEqual(Object.keys(d.rooms[1].photos[0]), ['file', 'title', 'alt', 'date', 'title_en', 'alt_en']);
+  assert.deepEqual(d.rooms[1].photos[0], {
+    file: 'n1', title: '전화', alt: '부스', date: '2025.11.30', title_en: 'Payphone', alt_en: 'A red payphone booth', // English texts stay
+  });
 });
 
 test('saveEdits removes ai when fields end up empty, even without a confidence', () => {

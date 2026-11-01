@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="ko">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
+__REDIRECT__
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="__DESCRIPTION__">
 <title>__TITLE__</title>
+__ALTERNATES__
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400&family=Noto+Serif+KR:wght@400&family=IBM+Plex+Sans+KR:wght@400;500&display=swap">
@@ -425,51 +427,27 @@ button { font: inherit; color: inherit; }
 </style>
 </head>
 <body>
-
-<header class="bar">
-  <div class="bar-in">
-    <h1><a class="mark" href="#top">__TITLE__</a></h1>
-    <nav class="bar-rooms" aria-label="전시실">
-__NAV__
+<div class="shell" id="top">
+  <aside class="side">
+    <a class="mark" href="#top">__TITLE__</a>
+    <nav aria-label="__NAVLABEL__">
+      <details class="menu"><summary>__MENU__</summary><ul class="rooms">__NAV__</ul></details>
+      <ul class="rooms rooms-side">__NAV__</ul>
     </nav>
-  </div>
-</header>
-
-<div class="page">
-<main>
+    <a class="lang" href="__SWITCHHREF__" lang="__SWITCHLANG__" hreflang="__SWITCHLANG__">__SWITCH__</a>
+    <p class="fine">__TOTALTEXT__<br>__COPYRIGHT__<br><a class="foot-admin" href="__BASE__admin/">__ADMIN__</a></p>
+  </aside>
+  <main class="main">
 __COVER__
-  <p class="lede">__LEDE__</p>
-
 __ROOMS__
-</main>
-
-<footer class="foot">
-  <p>__COPYRIGHT__</p>
-  <p>사진 __TOTAL__점 · 사진을 누르면 크게 볼 수 있어요 · <a class="foot-admin" href="admin/">관리</a></p>
-</footer>
+    <footer class="foot">__TOTALTEXT__ · __COPYRIGHT__ · <a class="foot-admin" href="__BASE__admin/">__ADMIN__</a></footer>
+  </main>
 </div>
-
-<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="사진 크게 보기" hidden>
-  <div class="lb-top">
-    <span class="lb-count" id="lb-count"></span>
-    <button class="lb-btn" id="lb-close" type="button" aria-label="닫기">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-    </button>
-  </div>
-  <div class="lb-stage" id="lb-stage">
-    <img class="lb-img" id="lb-img" alt="">
-  </div>
+<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="__VIEWERLABEL__" hidden>
+  <div class="lb-stage" id="lb-stage"><img class="lb-img" id="lb-img" alt=""></div>
   <div class="lb-bar">
-    <button class="lb-btn" id="lb-prev" type="button" aria-label="이전 사진">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
-    </button>
-    <div class="lb-caption" aria-live="polite">
-      <p class="lb-title" id="lb-title"></p>
-      <p class="lb-meta" id="lb-meta"></p>
-    </div>
-    <button class="lb-btn" id="lb-next" type="button" aria-label="다음 사진">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
-    </button>
+    <p class="lb-caption" aria-live="polite"><span id="lb-title"></span><span class="lb-date" id="lb-date"></span></p>
+    <p class="lb-nav"><span class="lb-count" id="lb-count"></span> <button class="lb-link" id="lb-prev" type="button">__PREV__</button> · <button class="lb-link" id="lb-next" type="button">__NEXT__</button> · <button class="lb-link" id="lb-close" type="button">__CLOSE__</button></p>
   </div>
 </div>
 

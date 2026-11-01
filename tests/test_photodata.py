@@ -18,6 +18,13 @@ class DataTests(unittest.TestCase):
     def test_canonical_text(self):
         self.assertEqual(photolib.dumps_data(helpers.SITE), (helpers.FIXTURES / "site.canonical.json").read_text(encoding="utf-8"))
 
+    def test_real_data_shape(self):
+        data = photolib.load_data(helpers.ROOT)
+        self.assertNotIn("lede", data["site"])
+        self.assertIn("{total}", data["site"]["description_en"])
+        for room in data["rooms"]:
+            self.assertTrue({"id", "name", "name_en", "note", "photos"} <= set(room), room["id"])
+
     def test_save_load_roundtrip(self):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)

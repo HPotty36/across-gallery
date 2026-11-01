@@ -1,8 +1,8 @@
 {
   "site": {
     "title": "Nocturne",
-    "lede": "물가와 경기장, 늦은 밤길에서 찍은 사진 {total}점을 네 개의 방에 나눠 걸었습니다.",
     "description": "물가와 경기장, 늦은 밤길에서 찍은 사진 {total}점을 모은 사진 전시 사이트.",
+    "description_en": "A photo exhibition of {total} photographs taken by the river, at the stadium and on late-night streets.",
     "copyright": "© 2026 Nocturne"
   },
   "cover": "0306",

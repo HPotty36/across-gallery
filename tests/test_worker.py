@@ -612,10 +612,12 @@ class RedraftEditTests(FakeRepo, unittest.TestCase):
     def test_a_photo_without_ai_record(self):
         _, p = self.redraft("n1", lambda p: p.update(alt="내 설명"))
         self.assertEqual(p, {"file": "n1", "title": "초안", "alt": "내 설명", "date": "2025.11.30",
+                             "title_en": "Payphone", "alt_en": "A red payphone booth",
                              "ai": {"model": "gemma4:12b-it-qat", "fields": ["title"]}})
     def test_both_changed_meanwhile_only_removes_the_request(self):
         _, p = self.redraft("n1", lambda p: p.update(title="내 제목", alt="내 설명"))
-        self.assertEqual(p, {"file": "n1", "title": "내 제목", "alt": "내 설명", "date": "2025.11.30"})
+        self.assertEqual(p, {"file": "n1", "title": "내 제목", "alt": "내 설명", "date": "2025.11.30",
+                             "title_en": "Payphone", "alt_en": "A red payphone booth"})
 
 
 class TakeableTests(FakeRepo, unittest.TestCase):

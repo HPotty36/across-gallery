@@ -1,8 +1,8 @@
 {
   "site": {
     "title": "Nocturne",
-    "lede": "사진 {total}점",
     "description": "사진 {total}점",
+    "description_en": "{total} photographs",
     "copyright": "© 2026 Nocturne"
   },
   "cover": "a1",
@@ -23,7 +23,7 @@
       "name_en": "Night",
       "note": "가로등 아래",
       "photos": [
-        {"file":"n1","title":"공중전화","alt":"빨간 공중전화 부스","date":"2025.11.30"}
+        {"file":"n1","title":"공중전화","alt":"빨간 공중전화 부스","date":"2025.11.30","title_en":"Payphone","alt_en":"A red payphone booth"}
       ]
     }
   ]

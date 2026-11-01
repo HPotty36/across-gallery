@@ -1,3 +1,4 @@
+import hashlib
 import re
 import shutil
 import tempfile
@@ -9,6 +10,10 @@ import build
 import photolib
 
 
+def body(html):
+    return html.split("<body>", 1)[1].split("<script>", 1)[0]  # the old <style> still names gone classes until Task 2
+
+
 class BuildTests(unittest.TestCase):
     def setUp(self):
         self.root = helpers.make_site(Path(tempfile.mkdtemp()))
@@ -18,37 +23,122 @@ class BuildTests(unittest.TestCase):
         build.build(self.root)
         return (self.root / "index.html").read_text(encoding="utf-8")
 
-    def test_roman(self):
-        self.assertEqual([build.roman(n) for n in (1, 2, 3, 4, 9, 14)], ["I", "II", "III", "IV", "IX", "XIV"])
+    def en(self):
+        build.build(self.root)
+        return (self.root / "en" / "index.html").read_text(encoding="utf-8")
 
     def test_page(self):
         html = self.html()
-        for s in ("<title>Nocturne</title>", '<a class="mark" href="#top">Nocturne</a>', '<span class="room-num">II</span>',
-                  '<span class="label-meta">2025.11.30</span>', '<figure class="cover">'):
+        for s in ('<html lang="ko">', "<title>Nocturne</title>", '<a class="mark" href="#top">Nocturne</a>',
+                  '<li><a href="#river">강</a></li>', '<h2>강</h2><span class="room-count">2점</span>',
+                  '<h2>밤</h2><span class="room-count">1점</span>', '<summary>목록</summary>', '<nav aria-label="전시실">',
+                  '<a class="lang" href="en/" lang="en" hreflang="en">English</a>', '사진 3점<br>© 2026 Nocturne<br>'):
             self.assertIn(s, html)
+        for gone in ("room-num", "room-en", "room-note", "lede", "River", "Night", "label-meta", "data-meta"):
+            self.assertNotIn(gone, body(html))
         self.assertEqual(html.count('<figure class="print"'), 3)
+        self.assertEqual(html.count('<li><a href="#night">밤</a></li>'), 2)  # phone menu and side list
         self.assertIsNone(re.search(r"__[A-Z]+__", html))
+
+    def test_english_page(self):
+        html = self.en()
+        for s in ('<html lang="en">', '<li><a href="#river">River</a></li>', '<h2>Night</h2><span class="room-count">1</span>',
+                  '<summary>Index</summary>', '<nav aria-label="Rooms">', 'aria-label="Photo viewer"', '>Previous<', '>Next<', '>Close<',
+                  '<a class="lang" href="../" lang="ko" hreflang="ko">한국어</a>', '3 photographs<br>',
+                  '<a class="foot-admin" href="../admin/">Admin</a>', '<meta name="description" content="3 photographs">'):
+            self.assertIn(s, html)
+        self.assertIn('aria-label="View Payphone"', html)
+        self.assertIn('<figcaption class="label">Payphone<span class="label-date">, 2025.11.30</span></figcaption>', html)
+        self.assertRegex(html, r'<img id="alt-n1" src="\.\./photos/thumb/n1\.jpg\?v=[0-9a-f]{8}" alt="A red payphone booth"')
+        self.assertIsNone(re.search(r'(src|data-thumb|data-full)="photos/', html))  # every asset path starts with ../
+        self.assertIsNone(re.search(r"__[A-Z]+__", html))
+
+    def test_english_falls_back_to_korean(self):
+        html = self.en()
+        self.assertRegex(html, r'data-slug="a2"[^>]*data-title="다리 아래"[^>]*data-title-lang="ko"')
+        self.assertIn('<figcaption class="label"><span lang="ko">다리 아래</span></figcaption>', html)
+        self.assertRegex(html, r'<img id="alt-a2"[^>]*alt="다리 상판"[^>]*lang="ko"')
+        self.assertNotIn('data-title-lang', re.search(r'<figure class="print" data-slug="n1".*?</figure>', html, re.S).group(0))
+
+    def test_alternates_and_redirect(self):
+        ko, en = self.html(), self.en()
+        for page, links in ((ko, ("./", "en/", "./")), (en, ("../", "./", "../"))):
+            for lang, href in zip(("ko", "en", "x-default"), links):
+                self.assertIn(f'<link rel="alternate" hreflang="{lang}" href="{href}">', page)
+        self.assertIn("localStorage.getItem('nocturne.lang')", ko)
+        self.assertIn("location.replace('en/'+location.hash)", ko)
+        self.assertNotIn("location.replace", en)
+
+    def test_total_text(self):
+        self.assertEqual([build.total_text("ko", 3), build.total_text("en", 3), build.total_text("en", 1)],
+                         ["사진 3점", "3 photographs", "1 photograph"])
+
+    def test_room_span(self):
+        span = build.room_span
+        self.assertEqual(span([]), "")
+        self.assertEqual(span([{"date": "2025.11.30"}]), "2025.11")
+        self.assertEqual(span([{"date": "2026.09.01"}, {"date": "2026.09.30"}]), "2026.09")
+        self.assertEqual(span([{"date": "2026.09.03"}, {}, {"date": "2025.11.30"}]), "2025.11 – 2026.09")
+        self.assertEqual(span([{"date": "알 수 없음"}, {}]), "")
+        html = self.html()
+        self.assertIn('<span class="room-count">1점</span><span class="room-span">2025.11</span></header>', html)
+        self.assertIn('<span class="room-count">2점</span></header>', html)  # river: no dates, no span
+
+    def test_labels_and_data(self):
+        html = self.html()
+        self.assertIn('<figcaption class="label">공중전화<span class="label-date">, 2025.11.30</span></figcaption>', html)
+        self.assertIn('<figcaption class="label">다리 아래</figcaption>', html)
+        self.assertRegex(html, r'data-slug="n1"[^>]*data-title="공중전화" data-date="2025.11.30"')
+        self.assertRegex(html, r'data-slug="a2"[^>]*data-title="다리 아래" data-date=""')
 
     def test_screen_readers_hear_the_alt_and_clean_names(self):
         html = self.html()
+        thumb = build.asset_url(self.root, "thumb", "n1")
         # the button's aria-label names it; the photo's alt text describes it
         self.assertIn('<button class="print-btn" type="button" aria-label="공중전화 크게 보기" aria-describedby="alt-n1">'
-                      '<img id="alt-n1" src="photos/thumb/n1.jpg" alt="빨간 공중전화 부스"', html)
+                      f'<img id="alt-n1" src="{thumb}" alt="빨간 공중전화 부스"', html)
         for name in ("a1", "a2", "n1"):
-            self.assertIn(f'<img id="alt-{name}" src="photos/thumb/{name}.jpg"', html)
+            self.assertIn(f'<img id="alt-{name}" src="{build.asset_url(self.root, "thumb", name)}"', html)
         cover = re.search(r'<button class="cover-btn"[^>]*>', html).group(0)
         self.assertIn('aria-label="스카이라인 크게 보기"', cover)
         self.assertIn('aria-describedby="alt-a1"', cover)  # the cover is also in its room: it points at that image
         ids = re.findall(r'\bid="([^"]+)"', html)
         self.assertEqual(len(ids), len(set(ids)), "ids must be unique")
-        # "I 강", not "I강": the numeral is decoration; "강 River", not "강River", and River is read as English
-        self.assertIn('<a href="#river"><span class="num" aria-hidden="true">I</span>강</a>', html)
-        self.assertIn('<h2>강 <span class="room-en" lang="en">River</span></h2>', html)
+
+    def test_cover(self):
+        cover = re.search(r'<figure class="cover">.*?</figure>', self.html(), re.S).group(0)
+        self.assertIn('data-open="a1"', cover)
+        self.assertIn('<figcaption class="label">스카이라인</figcaption>', cover)
+
+    def test_cover_missing(self):
+        for value in ("gone", None):
+            data = photolib.load_data(self.root)
+            if value is None: data.pop("cover", None)
+            else: data["cover"] = value
+            photolib.save_data(self.root, data)
+            self.assertNotIn('<figure class="cover">', self.html())
+
+    def test_empty_room(self):
+        data = photolib.load_data(self.root)
+        data["rooms"].append({"id": "new", "name": "새 방", "name_en": "New", "note": "n", "photos": []})
+        photolib.save_data(self.root, data)
+        html = self.html()
+        self.assertIn('<h2>새 방</h2><span class="room-count">0점</span></header><div class="hang">', html)
+        self.assertIn('<li><a href="#new">새 방</a></li>', html)
+
+    def test_versioned_urls(self):
+        url = build.asset_url(self.root, "thumb", "n1")
+        digest = hashlib.sha256(photolib.thumb_path(self.root, "n1").read_bytes()).hexdigest()[:8]
+        self.assertEqual(url, f"photos/thumb/n1.jpg?v={digest}")
+        html = self.html()
+        self.assertIn(f'data-thumb="{url}"', html)
+        self.assertIn(f'<img id="alt-n1" src="{url}"', html)
+        self.assertIn(f'data-full="{build.asset_url(self.root, "full", "n1")}"', html)
+        helpers.make_jpeg(photolib.thumb_path(self.root, "n1"), (300, 200), (10, 200, 10))
+        self.assertNotEqual(build.asset_url(self.root, "thumb", "n1"), url)
 
     def test_footer_links_to_the_admin_page(self):
-        foot = re.search(r'<footer class="foot">(.*?)</footer>', self.html(), re.S).group(1)
-        last = re.findall(r"<p>.*?</p>", foot, re.S)[-1]
-        self.assertTrue(last.endswith(' · <a class="foot-admin" href="admin/">관리</a></p>'), last)
+        self.assertEqual(self.html().count('<a class="foot-admin" href="admin/">관리</a>'), 2)
 
     def test_escapes_text(self):
         data = photolib.load_data(self.root); data["rooms"][0]["photos"][1]["title"] = "<b>&"
@@ -66,7 +156,7 @@ class BuildTests(unittest.TestCase):
         out = Path(tempfile.mkdtemp()) / "_site"
         self.addCleanup(shutil.rmtree, out.parent, ignore_errors=True)
         build.build(self.root, out)
-        for p in ("index.html", "photos/thumb/a1.jpg", "photos/full/n1.jpg", "admin/index.html"):
+        for p in ("index.html", "en/index.html", "photos/thumb/a1.jpg", "photos/full/n1.jpg", "admin/index.html"):
             self.assertTrue((out / p).exists(), p)
         self.assertFalse((self.root / "index.html").exists())
         for p in ("src", "queue"):
