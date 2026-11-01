@@ -7,6 +7,7 @@
     ["IMG_0475_EDITED.JPG", "0475"], ["1000017291_edited.jpg", "1000017291"], ["1000017291 (edited).jpg", "1000017291"],
     ["IMG_0475-Edited.jpg", "0475"], ["IMG_0475 edited.jpg", "0475"], ["editedphoto.jpg", "editedphoto"],
     ["my edited trip.jpg", "my_trip"],
+    ["unedited.jpg", "unedited"], ["IMG_0475_Xedited.jpg", "0475_xedited"], ["a(edited)b.jpg", "ab"], ["edited2.jpg", "edited2"],
     ["ed\u0130ted.jpg", "edi_ted"], ["ed\u0131ted.jpg", "ed_ted"], ["\u212aedited.jpg", "k"], ["\u017fedited.jpg", "photo"]
   ],
   "grayscale": [

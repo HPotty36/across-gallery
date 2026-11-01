@@ -235,7 +235,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
     ```
 
   - 로그인 바로 뒤 "GitHub App이 nocturne 저장소에 설치되어 있지 않아요"가 나오면 App이 `nocturne`에 설치되지 않은 것이다. App 화면의 **Install App**에서 `nocturne`에 설치한다. 설치된 목록은 GitHub **Settings** → **Applications** → **Installed GitHub Apps**에서 본다 (만든 App과 설치된 App은 다르다).
-  - "이 GitHub 계정으로는 관리할 수 없어요"는 로그인한 계정에 `nocturne`에 쓸 권한이 없다는 뜻이다.
+  - "이 GitHub 계정으로는 관리할 수 없어요"는 로그인한 계정 또는 App에 `nocturne`의 쓰기 권한이 없다는 뜻이다. 로그인 뒤 일하다가 GitHub가 403으로 거절해도 같은 말이 뜬다.
   - App의 client secret을 새로 만들었다면 Worker의 `CLIENT_SECRET`도 바꿔 넣는다.
   - 폰에서만 안 되면 그 폰 브라우저가 github.com에 로그인돼 있는지 본다.
   - 저절로 로그인하다 실패한 탭은 다시 저절로 하지 않는다. 고친 뒤 **GitHub로 로그인**을 누른다.

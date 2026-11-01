@@ -10,8 +10,9 @@ Usage:  python scripts/prepare_photos.py [--force]   (Windows: py scripts\\prepa
 3. It prints a JSON entry for every photo that is not yet in src/photos.json.
    Paste those into the right room, fill in title and alt, then run build.py.
 
-<name> is the file name in lower case without "IMG_" and "_Edited",
-e.g. IMG_0306_Edited.jpeg -> 0306. The conversion itself lives in photolib.py.
+<name> is the file name in lower case without "IMG_" and without "edited" as a separate
+word (any case, with its separator and brackets), e.g. IMG_0306_Edited.jpeg -> 0306.
+The conversion itself lives in photolib.py.
 """
 import json
 import sys
