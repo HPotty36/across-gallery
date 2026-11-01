@@ -232,6 +232,20 @@ export class GitHub {
     return GitHub.#parse(status, bytes).permissions?.push === true;
   }
 
+  /** True if the GitHub App of this user token is installed on `repo`: on all of its owner's repositories, or on a selection that lists it. */
+  async installedOn(repo) {
+    const wanted = repo.toLowerCase();
+    const owner = wanted.split('/')[0];
+    const { installations } = await this.#json('GET', '/user/installations?per_page=100');
+    for (const { id, repository_selection: selected, account } of installations ?? []) {
+      if (selected === 'all' && account?.login?.toLowerCase() === owner) return true;
+      if (selected !== 'selected') continue;
+      const { repositories } = await this.#json('GET', `/user/installations/${id}/repositories?per_page=100`);
+      if (repositories?.some(({ full_name: name }) => name?.toLowerCase() === wanted)) return true;
+    }
+    return false;
+  }
+
   /** [{name, path, sha, type}] of a folder (type "file" or "dir"); [] if it does not exist. */
   async listDir(repo, path) {
     const { status, bytes } = await this.#request('GET', contentsPath(repo, path));

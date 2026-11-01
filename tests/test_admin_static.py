@@ -37,6 +37,7 @@ class AdminStaticTests(unittest.TestCase):
                          helpers.theme_tokens(helpers.ROOT / "src" / "template.html"))
     LABELS = ["새 사진", "전시 중", "GitHub로 로그인", "로그인하는 중…", "로그인을 취소했어요",
               "로그인하지 못했어요. 잠시 뒤 다시 해 주세요", "이 GitHub 계정으로는 관리할 수 없어요",
+              "GitHub App이 nocturne 저장소에 설치되어 있지 않아요",
               "로그인이 끝났어요. 다시 로그인해 주세요", "로그아웃했어요", "로그아웃", "대표로 지정", "AI로 다시 쓰기",
               "AI가 다시 쓰는 중…", "이미 게시한 사진은 GitHub 기록에 남습니다",
               "대표 사진은 다른 사진을 대표로 지정한 뒤 지울 수 있어요", "사이트 반영 중…", "반영됨", "반영 실패",

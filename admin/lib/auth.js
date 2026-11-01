@@ -22,6 +22,7 @@ export const MESSAGES = Object.freeze({
   cancelled: '로그인을 취소했어요',
   failed: '로그인하지 못했어요. 잠시 뒤 다시 해 주세요',
   notAllowed: '이 GitHub 계정으로는 관리할 수 없어요',
+  notInstalled: 'GitHub App이 nocturne 저장소에 설치되어 있지 않아요',
   expired: '로그인이 끝났어요. 다시 로그인해 주세요',
   loggedOut: '로그아웃했어요',
   noStorage: '이 브라우저에서는 로그인할 수 없어요',

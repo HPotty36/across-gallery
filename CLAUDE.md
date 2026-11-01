@@ -76,6 +76,7 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 - `deny`: GitHub 화면에서 취소한 것처럼 → "로그인을 취소했어요"
 - `down`: Worker가 GitHub에 닿지 못한 것처럼 → "로그인하지 못했어요. 잠시 뒤 다시 해 주세요"
 - `reader`: 이 저장소에 쓸 수 없는 계정 → "이 GitHub 계정으로는 관리할 수 없어요"
+- `uninstalled`: App이 어디에도 설치되지 않은 것처럼 → "GitHub App이 nocturne 저장소에 설치되어 있지 않아요"
 - `ok`: 원래대로 (처음 값)
 - `"expires_in": <초>`를 같이 주면 그다음 받는 토큰이 그만큼만 간다. 예를 들어 `{"mode":"ok","expires_in":900}`으로 로그인하면 다른 탭에 갔다 돌아오자마자 "로그인이 끝났어요. 다시 로그인해 주세요".
 
@@ -141,7 +142,7 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
    | 설치할 수 있는 곳 | Only on this account |
 
    **Create GitHub App** → **General** 화면 위쪽 About에 보이는 **Client ID**(`Iv23…`, 숫자인 App ID가 아님)를 적어 둔다 (공개 값). client secret은 General이 아니라 왼쪽 **Credentials** 메뉴에 있다: **Generate a new client secret** → client secret을 복사한다 (비밀 값, 다시 볼 수 없다. Worker에만 넣는다).
-2. **App 설치**: App 화면 왼쪽 **Install App** → **Install** → **Only select repositories** → `nocturne`만. 설치하지 않으면 로그인은 되지만 쓰기가 막힌다.
+2. **App 설치**: App 화면 왼쪽 **Install App** → **Install** → **Only select repositories** → `nocturne`만. 설치하지 않으면 로그인할 때 "GitHub App이 nocturne 저장소에 설치되어 있지 않아요"가 나온다. **만든 App(Developer settings → GitHub Apps)과 설치된 App(Settings → Applications → Installed GitHub Apps)은 다르다**: Installed 목록에 있어야 설치된 것이다.
 3. **Worker 올리기**: Cloudflare 무료 계정을 만든다. `<하위주소>.workers.dev`의 하위 주소는 관리 페이지 설정과 CSP에 공개로 들어가므로 실명이 아닌 이름으로 정한다. 대시보드 → **Workers & Pages** → **Create** → **Hello World**, 이름 `nocturne-auth` → **Edit code**에 `auth/worker.js` 내용을 통째로 붙여 넣고 **Deploy**. 그다음 Worker의 **Settings** → **Variables and Secrets**에 넣고 다시 Deploy:
    - `CLIENT_ID` (Text): App의 Client ID
    - `CLIENT_SECRET` (Secret): App의 client secret
@@ -233,7 +234,8 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
     curl -s -X POST https://nocturne-auth.<하위주소>.workers.dev/token -H "Origin: https://hpotty36.github.io" -H "Content-Type: application/json" -d "{\"code\":\"x\",\"code_verifier\":\"y\",\"redirect_uri\":\"https://hpotty36.github.io/nocturne/admin/\"}"
     ```
 
-  - 로그인 바로 뒤나 처음 저장할 때 "이 GitHub 계정으로는 관리할 수 없어요"가 나오면 대개 App이 `nocturne`에 설치되지 않은 것이다 (GitHub **Settings** → **Applications** → **Installed GitHub Apps**). 저장소에 쓸 권한이 없는 계정이어도 같은 말이 나온다.
+  - 로그인 바로 뒤 "GitHub App이 nocturne 저장소에 설치되어 있지 않아요"가 나오면 App이 `nocturne`에 설치되지 않은 것이다. App 화면의 **Install App**에서 `nocturne`에 설치한다. 설치된 목록은 GitHub **Settings** → **Applications** → **Installed GitHub Apps**에서 본다 (만든 App과 설치된 App은 다르다).
+  - "이 GitHub 계정으로는 관리할 수 없어요"는 로그인한 계정에 `nocturne`에 쓸 권한이 없다는 뜻이다.
   - App의 client secret을 새로 만들었다면 Worker의 `CLIENT_SECRET`도 바꿔 넣는다.
   - 폰에서만 안 되면 그 폰 브라우저가 github.com에 로그인돼 있는지 본다.
   - 저절로 로그인하다 실패한 탭은 다시 저절로 하지 않는다. 고친 뒤 **GitHub로 로그인**을 누른다.

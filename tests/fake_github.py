@@ -13,8 +13,9 @@ It also plays the admin page's login, which needs no token: GET /login/oauth/aut
 (it asks nobody and sends the browser straight back with a code, or with access_denied) and POST /_auth/token is
 the code-exchange Worker (it answers {access_token, expires_in} when the PKCE verifier fits the code's challenge and
 the redirect_uri is the one the code was sent to).
-PUT /_fake/login {mode, expires_in?} picks how login behaves: ok, deny, down (the Worker cannot reach GitHub) or
-reader (the account may not push to the repo).
+PUT /_fake/login {mode, expires_in?} picks how login behaves: ok, deny, down (the Worker cannot reach GitHub),
+reader (the account may not push to the repo) or uninstalled (the GitHub App is installed nowhere: GET /user/installations
+is empty). Otherwise GET /user/installations lists one installation on the repos the fake holds, as the App's user token sees it.
 
 A repo is a set of git objects: blobs by sha, trees as {path: blob sha} snapshots, commits that point at a
 snapshot. `main` is the only branch. The fake is stricter than GitHub in a few places, so clients
@@ -50,7 +51,7 @@ CORS = {
 _RAW_ACCEPT = re.compile(r"application/vnd\.github(\.v3)?\.raw")
 _FIRST_COMMIT_TIME = 1_760_000_000  # fake commit times count up from here, one second per commit
 _ACCOUNT = {"name": "Fake", "email": "fake@example.test"}  # who a commit is by when the request names nobody
-LOGIN_MODES = ("ok", "deny", "down", "reader")
+LOGIN_MODES = ("ok", "deny", "down", "reader", "uninstalled")
 _LOGIN_LIFETIME = 28800  # seconds a login token lasts unless set_login says otherwise (GitHub App user tokens: 8 hours)
 _WEB_ADDRESS = re.compile(r"https?://[^\s#]+")
 
@@ -192,7 +193,7 @@ class FakeGitHub:
     def __init__(self, token="test-token"):
         self.token = token
         self.url = None
-        self.requests = []  # (method, path without query) of every /repos request; OPTIONS and /_fake are not logged
+        self.requests = []  # (method, path without query) of every /repos and /user/installations request; OPTIONS and /_fake are not logged
         self._repos = {}
         self._failures = []  # [method, path prefix, status, times left]
         self._runs = {}      # (repo, workflow file) -> run
@@ -335,7 +336,7 @@ class FakeGitHub:
                 return self._authorize(query)
             if (method, path) == ("POST", "/_auth/token"):
                 return self._token(body)
-            if not path.startswith("/repos/"):
+            if not path.startswith(("/repos/", "/user/installations")):
                 raise _HttpError(404, f"Not Found: the fake has no route for {method} {path}")
             with self._lock:
                 self.requests.append((method, path))
@@ -347,6 +348,8 @@ class FakeGitHub:
                         if rule[3] <= 0:
                             self._failures.remove(rule)
                         raise _HttpError(rule[2], "Injected failure (fail_next)")
+                if path.startswith("/user/installations"):
+                    return self._installations(method, path)
                 return self._route(method, path, query, headers, body)
         except _HttpError as err:
             return err.status, _error_body(err.status, err.message)
@@ -390,6 +393,19 @@ class FakeGitHub:
         elif rest[:2] == ["actions", "workflows"] and rest[3:] == ["runs"] and method == "GET":
             run = self._runs.get((name, rest[2]))
             return 200, {"total_count": 1 if run else 0, "workflow_runs": [run] if run else []}
+        raise _HttpError(404, f"Not Found: the fake has no route for {method} {path}")
+
+    def _installations(self, method, path):
+        """What the App's user token sees of its installations: one, on every repo the fake holds (none when uninstalled)."""
+        if method == "GET" and path == "/user/installations":
+            if self._login_mode == "uninstalled":
+                return 200, {"total_count": 0, "installations": []}
+            owner = next(iter(self._repos), SEED_REPO).partition("/")[0]
+            return 200, {"total_count": 1, "installations": [{"id": 1, "app_slug": "nocturne-admin-fake", "repository_selection": "selected",
+                                                              "account": {"login": owner}}]}
+        if method == "GET" and path == "/user/installations/1/repositories":
+            return 200, {"total_count": len(self._repos), "repository_selection": "selected",
+                         "repositories": [{"full_name": name} for name in self._repos]}
         raise _HttpError(404, f"Not Found: the fake has no route for {method} {path}")
 
     # --- login ---

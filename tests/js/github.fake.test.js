@@ -115,6 +115,20 @@ test('canPush is true for a repository the token can write to', async () => {
   await assert.rejects(new GitHub({ token: 'wrong', api: base }).canPush(repo), (e) => e instanceof AuthError && e.message === '로그인이 끝났어요. 다시 로그인해 주세요' && e.status === 401);
 });
 
+test('installedOn is true for a repository the fake holds, false for one it does not, and false when the App is uninstalled', async () => {
+  const repo = await repoWith({ 'a.txt': 'a' });
+  assert.equal(await client().installedOn(repo), true);
+  assert.equal(await client().installedOn('o/does-not-exist'), false);
+  await assert.rejects(new GitHub({ token: 'wrong', api: base }).installedOn(repo), (e) => e instanceof AuthError && e.status === 401);
+  assert.equal((await http('PUT', '/_fake/login', { auth: false, body: { mode: 'uninstalled' } })).status, 200);
+  try {
+    assert.equal(await client().installedOn(repo), false);
+  } finally {
+    await http('PUT', '/_fake/login', { auth: false, body: { mode: 'ok' } });
+  }
+  assert.equal(await client().installedOn(repo), true);
+});
+
 test('commitFiles adds a file, copies a blob by its sha and deletes a file, in one commit', async () => {
   const everyByte = Uint8Array.from({ length: 256 }, (_, i) => i);
   const repo = await repoWith({ 'b.txt': 'bee', 'orig/photo.bin': everyByte });

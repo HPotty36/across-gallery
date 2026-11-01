@@ -173,6 +173,10 @@ async function finishLogin(got) {
       openLogin(MESSAGES.notAllowed, true); // the token goes with `github`
       return;
     }
+    if (!(await github.installedOn(config.repo))) {
+      openLogin(MESSAGES.notInstalled, true);
+      return;
+    }
   } catch (error) {
     report(error);
     openLogin(loginFailureMessage(error), true);

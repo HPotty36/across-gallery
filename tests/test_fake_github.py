@@ -240,6 +240,37 @@ class FakeApiTests(unittest.TestCase):
         status, error = self.call("GET", path, auth=None)
         self.assertEqual((status, error["message"]), (401, "Bad credentials"))
 
+    def test_installations_need_a_token(self):
+        for path in ("/user/installations", "/user/installations/1/repositories"):
+            with self.subTest(path):
+                self.assertEqual(self.call("GET", path, auth=None)[0], 401)
+                self.assertEqual(self.call("GET", path, auth="Bearer wrong")[0], 401)
+                self.assertEqual(self.call("GET", path, auth="token test-token")[0], 200)
+
+    def test_installations_default_to_the_repos_the_fake_holds(self):
+        status, listing = self.call("GET", "/user/installations?per_page=100")
+        self.assertEqual(status, 200)
+        self.assertEqual(listing, {"total_count": 1, "installations": [
+            {"id": 1, "app_slug": "nocturne-admin-fake", "repository_selection": "selected", "account": {"login": "HPotty36"}}]})
+        status, repos = self.call("GET", "/user/installations/1/repositories?per_page=100")
+        self.assertEqual((status, repos), (200, {"total_count": 1, "repository_selection": "selected", "repositories": [{"full_name": R}]}))
+        self.fake.put_file("HPotty36/other", "a.txt", b"a")
+        repos = self.call("GET", "/user/installations/1/repositories")[1]
+        self.assertEqual((repos["total_count"], [r["full_name"] for r in repos["repositories"]]), (2, [R, "HPotty36/other"]))
+        self.assertEqual(self.fake.requests[:2], [("GET", "/user/installations"), ("GET", "/user/installations/1/repositories")])  # logged like /repos
+
+    def test_an_unknown_installation_is_not_found(self):
+        self.assertEqual(self.call("GET", "/user/installations/2/repositories")[0], 404)
+        self.assertEqual(self.call("GET", "/user/installations/1")[0], 404)
+        self.assertEqual(self.call("POST", "/user/installations")[0], 404)
+
+    def test_uninstalled_mode_has_no_installations(self):
+        self.fake.set_login("uninstalled")
+        self.assertEqual(self.call("GET", "/user/installations"), (200, {"total_count": 0, "installations": []}))
+        self.assertEqual(self.call("GET", f"/repos/{R}")[1]["permissions"]["push"], True)  # the account itself may still push
+        self.fake.set_login("ok")
+        self.assertEqual(self.call("GET", "/user/installations")[1]["total_count"], 1)
+
     def test_failures_are_injected_and_logged(self):
         prefix = f"/repos/{R}/contents"
         self.call("POST", "/_fake/fail_next", {"method": "GET", "path_prefix": prefix, "status": 503, "times": 2}, auth=None)
@@ -389,6 +420,10 @@ class FakeLoginTests(unittest.TestCase):
         self.assertTrue(self.push_allowed() is False)
         self.assertEqual(self.token(self.new_code()), (200, {"access_token": "test-token", "expires_in": 28800}))  # the token still works
 
+        self.fake.set_login("uninstalled")
+        self.assertEqual(self.token(self.new_code()), (200, {"access_token": "test-token", "expires_in": 28800}))  # logging in works; the App is what is missing
+        self.assertTrue(self.push_allowed() is True)
+
         self.fake.set_login("ok", expires_in=900)
         self.assertEqual(self.token(self.new_code()), (200, {"access_token": "test-token", "expires_in": 900}))
         self.assertTrue(self.push_allowed() is True)
@@ -400,6 +435,8 @@ class FakeLoginTests(unittest.TestCase):
         put = lambda body: self.fake.handle("PUT", "/_fake/login", {}, json.dumps(body).encode("utf-8"))
         self.assertEqual(put({"mode": "reader", "expires_in": 60}), (200, {"ok": True}))
         self.assertEqual((self.push_allowed(), self.token(self.new_code())[1]["expires_in"]), (False, 60))
+        self.assertEqual(put({"mode": "uninstalled"}), (200, {"ok": True}))
+        self.assertEqual(self.fake.handle("GET", "/user/installations", {"Authorization": AUTH}, b"")[1]["total_count"], 0)
         self.assertEqual(put({"mode": "ok"}), (200, {"ok": True}))
         self.assertEqual((self.push_allowed(), self.token(self.new_code())[1]["expires_in"]), (True, 28800))
         for label, body in (("unknown mode", {"mode": "nope"}), ("no mode", {}), ("expires_in is not a number", {"mode": "ok", "expires_in": "soon"})):

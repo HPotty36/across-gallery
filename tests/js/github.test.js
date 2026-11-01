@@ -537,6 +537,61 @@ test('canPush', async () => {
   await assert.rejects(client({ [`GET ${P}`]: { status: 401, json: {} } }).gh.canPush(R), AuthError);
 });
 
+const SITE = 'HPotty36/nocturne';
+const INSTALLATIONS = '/user/installations';
+const installation = (id, repository_selection, login = 'HPotty36') => ({ id, repository_selection, account: { login } });
+const listing = (...installations) => ({ json: { total_count: installations.length, installations } });
+const selection = (...names) => ({ json: { total_count: names.length, repository_selection: 'selected', repositories: names.map((full_name) => ({ full_name })) } });
+
+test('installedOn is false when the App is installed nowhere', async () => {
+  const { gh, calls } = client({ [`GET ${INSTALLATIONS}`]: listing() });
+  assert.equal(await gh.installedOn(SITE), false);
+  assert.deepEqual(steps(calls), [`GET ${INSTALLATIONS}`]);
+});
+
+test('installedOn: an installation on all repositories of the owner is enough, and no repositories are listed', async () => {
+  const { gh, calls } = client({ [`GET ${INSTALLATIONS}`]: listing(installation(7, 'all')) });
+  assert.equal(await gh.installedOn(SITE), true);
+  assert.deepEqual(steps(calls), [`GET ${INSTALLATIONS}`]);
+  assert.equal(await client({ [`GET ${INSTALLATIONS}`]: listing(installation(7, 'all', 'hpotty36')) }).gh.installedOn(SITE), true); // owner in any case
+  assert.equal(await client({ [`GET ${INSTALLATIONS}`]: listing(installation(7, 'all', 'someone-else')) }).gh.installedOn(SITE), false); // all of another account's
+});
+
+test('installedOn: a selection counts when it lists the repository', async () => {
+  const routes = (...names) => ({ [`GET ${INSTALLATIONS}`]: listing(installation(7, 'selected')), [`GET ${INSTALLATIONS}/7/repositories`]: selection(...names) });
+  assert.equal(await client(routes('HPotty36/other', SITE)).gh.installedOn(SITE), true);
+  assert.equal(await client(routes('HPotty36/other')).gh.installedOn(SITE), false);
+  assert.equal(await client(routes('hpotty36/NOCTURNE')).gh.installedOn(SITE), true); // GitHub names are case-insensitive
+  assert.equal(await client(routes()).gh.installedOn(SITE), false);
+});
+
+test('installedOn looks through every installation until one has the repository', async () => {
+  const { gh, calls } = client({
+    [`GET ${INSTALLATIONS}`]: listing(installation(3, 'selected', 'other-org'), installation(7, 'selected'), installation(9, 'selected')),
+    [`GET ${INSTALLATIONS}/3/repositories`]: selection('other-org/nocturne'),
+    [`GET ${INSTALLATIONS}/7/repositories`]: selection(SITE),
+  });
+  assert.equal(await gh.installedOn(SITE), true);
+  assert.deepEqual(steps(calls), [`GET ${INSTALLATIONS}`, `GET ${INSTALLATIONS}/3/repositories`, `GET ${INSTALLATIONS}/7/repositories`]); // 9 is never asked
+});
+
+test('installedOn asks for 100 at a time, with the JSON media type', async () => {
+  const { gh, calls } = client({ [`GET ${INSTALLATIONS}`]: listing(installation(7, 'selected')), [`GET ${INSTALLATIONS}/7/repositories`]: selection() });
+  await gh.installedOn(SITE);
+  assert.deepEqual(calls.map((c) => c.query), ['?per_page=100', '?per_page=100']);
+  assert.equal(calls[0].headers.Accept, 'application/vnd.github+json');
+});
+
+test('installedOn: failures are told as everywhere else', async () => {
+  await assert.rejects(client({ [`GET ${INSTALLATIONS}`]: { status: 403, json: { message: 'Resource not accessible' } } }).gh.installedOn(SITE), AuthError);
+  await assert.rejects(client({ [`GET ${INSTALLATIONS}`]: { status: 401, json: {} } }).gh.installedOn(SITE), AuthError);
+  await assert.rejects(client({ [`GET ${INSTALLATIONS}`]: { status: 500, json: { message: 'boom' } } }).gh.installedOn(SITE), isGitHubError(500));
+  await assert.rejects(client({
+    [`GET ${INSTALLATIONS}`]: listing(installation(7, 'selected')),
+    [`GET ${INSTALLATIONS}/7/repositories`]: { status: 403, json: { message: 'Forbidden' } },
+  }).gh.installedOn(SITE), AuthError);
+});
+
 test('blobSha is the git blob sha', async () => {
   assert.equal(await blobSha(new Uint8Array()), 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'); // git hash-object of an empty file
   assert.equal(await blobSha(encodeUtf8('hello\n')), 'ce013625030ba8dba906f756967f9e9ca394464a'); // echo hello | git hash-object --stdin
