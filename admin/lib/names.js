@@ -7,10 +7,10 @@ function stemOf(name) {
   return name;
 }
 
-/** IMG_0306_Edited.jpeg -> 0306 */
+/** IMG_0306_Edited.jpeg -> 0306. "edited" as a separate word, in any case, goes with its separator and brackets: "a (EDITED)" -> a. */
 export function nameFor(filename) {
   const base = String(filename).split(/[\\/]+/).filter(Boolean).pop() ?? '';
-  let stem = stemOf(base).replaceAll('_Edited', '').replaceAll('_edited', '');
+  let stem = stemOf(base).replace(/[ _.-]*\(?(?<![A-Za-z0-9])edited(?![A-Za-z0-9])\)?/gi, '');
   if (stem.toUpperCase().startsWith('IMG_')) stem = stem.slice(4);
   stem = stem.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^[_-]+|[_-]+$/g, '');
   return stem || 'photo';

@@ -3,7 +3,10 @@
     ["IMG_0306_Edited.jpeg", "0306"], ["20251116_185930798.jpg", "20251116_185930798"],
     ["KakaoTalk_20251130_123456789.JPG", "kakaotalk_20251130_123456789"], ["카톡 사진 1.jpg", "1"],
     ["사진.png", "photo"], ["image.jpg", "image"], ["my photo (1).jpeg", "my_photo_1"],
-    ["IMG_E1234.HEIC.jpg", "e1234_heic"]
+    ["IMG_E1234.HEIC.jpg", "e1234_heic"],
+    ["IMG_0475_EDITED.JPG", "0475"], ["1000017291_edited.jpg", "1000017291"], ["1000017291 (edited).jpg", "1000017291"],
+    ["IMG_0475-Edited.jpg", "0475"], ["IMG_0475 edited.jpg", "0475"], ["editedphoto.jpg", "editedphoto"],
+    ["my edited trip.jpg", "my_trip"]
   ],
   "grayscale": [
     {"base": [128,128,128], "count": 100, "spots": [], "expect": true},

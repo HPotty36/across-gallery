@@ -10,7 +10,7 @@ test('odd names match Python', () => {
   const cases = [
     ['', 'photo'], ['.jpg', 'jpg'], ['..jpg', 'jpg'], ['.hidden', 'hidden'], ['a.', 'a'], ['a..b', 'a'],
     ['a.b.c', 'a_b'], ['x .jpg', 'x'], ['-a-.jpg', 'a'], ['___.jpg', 'photo'], ['IMG_.jpg', 'photo'],
-    ['IMG_IMG_5.jpg', 'img_5'], ['img_1_EDITED.jpg', '1_edited'], ['IMG_1_edited_edited.JPG', '1'],
+    ['IMG_IMG_5.jpg', 'img_5'], ['img_1_EDITED.jpg', '1'], ['IMG_1_edited_edited.JPG', '1'],
     ['IMG_Edited.jpg', 'img'], ['Photo (2) copy.JPG', 'photo_2_copy'], ['ÀB.jpg', 'b'],
     ['dir/IMG_0002.png', '0002'], ['C:\\pics\\IMG_0001.jpg', '0001'],
   ];
