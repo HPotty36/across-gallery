@@ -4,9 +4,9 @@ Usage:  py tests\\browser\\run_worker.py http://127.0.0.1:8790 --by pc       (or
 
 Takes every queue item this worker may take now and processes it, as the PC helper (--by pc, model
 gemma4:12b-it-qat) or the e4b pass of GitHub Actions (--by github, gemma4:e4b-it-qat) would, but with the tests'
-FakeAI instead of a real AI: each photo is published with the title "초안" and the description "초안 설명" in the room
-"night". GitHub takes an upload at once; for --by pc the clock runs a minute past PC_WAIT_SECONDS ahead (6 minutes),
-so a fresh upload counts as older than the 5 minutes the PC waits.
+FakeAI instead of a real AI: each photo is published with the title "초안" and the description "초안 설명" (English:
+"Draft" and "A draft description") in the room "night". GitHub takes an upload at once; for --by pc the clock runs a
+minute past PC_WAIT_SECONDS ahead (6 minutes), so a fresh upload counts as older than the 5 minutes the PC waits.
 Prints one line per item ("published: <name>", "failed: <name>", "skipped: <name>").
 Only a local address is accepted: the token is the fake server's "test-token".
 """

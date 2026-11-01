@@ -31,6 +31,30 @@ class PromptTests(unittest.TestCase):
         for s in ("river (강): 물가에서 바라본 도시", "[밤] 공중전화 / 빨간 공중전화 부스", "장소의 이름을 쓰지 마세요", '{"room": "<방 id>"'):
             self.assertIn(s, p)
 
+    def test_prompt_asks_for_english_too(self):
+        p = curator.build_prompt(helpers.SITE)
+        self.assertEqual(curator.PROMPT_HEAD, "당신은 사진 전시 사이트의 큐레이터입니다. 이 사진을 아래 방 중 하나에 걸고, 한국어 제목과 대체 텍스트(alt), "
+                                              "그리고 같은 뜻의 영어 제목(title_en)과 영어 대체 텍스트(alt_en)를 쓰세요.")
+        self.assertTrue(p.startswith(curator.PROMPT_HEAD))
+        rule = "- 영어 제목은 2~6단어의 짧은 명사구, 영어 alt는 무엇이 찍혔는지 한 문장이고 마침표로 끝내지 마세요. 영어에도 위 규칙(장소 이름, 흑백)을 똑같이 지키세요."
+        self.assertTrue(curator.PROMPT_RULES.endswith("\n" + rule))  # the last rule line
+        self.assertIn(rule, p)
+        self.assertEqual(curator.PROMPT_REPLY,
+                         'JSON으로만 답하세요: {"room": "<방 id>", "title": "...", "alt": "...", "title_en": "...", "alt_en": "..."}')
+        for s in ("title_en", "alt_en", "[밤] 공중전화 / 빨간 공중전화 부스 | Payphone / A red payphone booth"):
+            self.assertIn(s, p)
+        self.assertIn("[강] 스카이라인 / 강 건너 빌딩\n", p)  # a photo without English has no " | " part
+        self.assertNotIn("스카이라인 / 강 건너 빌딩 |", p)
+
+    def test_english_example_needs_both_texts(self):
+        site = {"rooms": [{"id": "r", "name": "방", "note": "n", "photos": [
+            {"file": "p0", "title": "t0", "alt": "a0", "title_en": "T0"},
+            {"file": "p1", "title": "t1", "alt": "a1", "alt_en": "A1"}]}]}
+        p = curator.build_prompt(site)
+        self.assertIn("- [방] t0 / a0\n", p)
+        self.assertIn("- [방] t1 / a1\n", p)
+        self.assertNotIn(" | ", p)
+
     def test_examples_are_first_two_per_room(self):
         site = {"rooms": [{"id": "r", "name": "방", "note": "n", "photos": [
             {"file": f"p{i}", "title": f"t{i}", "alt": f"a{i}"} for i in range(3)]}]}
@@ -40,24 +64,48 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("t2", p)
 
 
+def reply_json(room="night", title="t", alt="a", title_en="T", alt_en="A", **extra):
+    """A model's JSON reply with the four texts (and whatever else `extra` adds)."""
+    return json.dumps({"room": room, "title": title, "alt": alt, "title_en": title_en, "alt_en": alt_en, **extra},
+                      ensure_ascii=False)
+
+
 class ParseTests(unittest.TestCase):
     ids = ["river", "night"]
 
     def test_ok_fenced_unknown_bad(self):
-        self.assertEqual(curator.parse_reply('{"room":"night","title":"t","alt":"a"}', self.ids)["known"], True)
-        self.assertEqual(curator.parse_reply('```json\n{"room":"river","title":"t","alt":"a"}\n```', self.ids)["room"], "river")
-        self.assertEqual(curator.parse_reply('{"room":"moon","title":"t","alt":"a"}', self.ids)["room"], "river")
-        for bad in ("not json", '{"room":"river","title":"t"}', '{"room":"river","title":"","alt":"a"}'):
+        self.assertEqual(curator.parse_reply(reply_json(), self.ids),
+                         {"room": "night", "title": "t", "alt": "a", "title_en": "T", "alt_en": "A", "known": True})
+        self.assertEqual(curator.parse_reply("```json\n" + reply_json(room="river") + "\n```", self.ids)["room"], "river")
+        moon = curator.parse_reply(reply_json(room="moon"), self.ids)
+        self.assertEqual((moon["room"], moon["known"]), ("river", False))
+        for bad in ("not json", '{"room":"river","title":"t"}', reply_json(title=""),
+                    '{"room":"river","title":"t","alt":"a"}'):  # the English texts are required
             with self.assertRaises(ValueError):
                 curator.parse_reply(bad, self.ids)
+
+    def test_both_english_texts_are_required_and_not_blank(self):
+        for key in ("title_en", "alt_en"):
+            missing = json.loads(reply_json())
+            del missing[key]
+            for label, reply in (("missing", json.dumps(missing)), ("empty", reply_json(**{key: ""})),
+                                 ("blank", reply_json(**{key: "   "})), ("null", reply_json(**{key: None})),
+                                 ("number", reply_json(**{key: 5}))):
+                with self.subTest(key=key, case=label), self.assertRaises(ValueError) as cm:
+                    curator.parse_reply(reply, self.ids)
+                self.assertIn(key, str(cm.exception))
+
+    def test_english_texts_are_stripped(self):
+        got = curator.parse_reply(reply_json(title_en="  Payphone ", alt_en="\nA red booth \n"), self.ids)
+        self.assertEqual((got["title_en"], got["alt_en"]), ("Payphone", "A red booth"))
 
 
 class ClampTests(unittest.TestCase):
     """A rambling model must not put a paragraph into the title or the alt (both go public without a person's look)."""
     ids = ["river"]
 
-    def parse(self, title, alt):
-        return curator.parse_reply(json.dumps({"room": "river", "title": title, "alt": alt}, ensure_ascii=False), self.ids)
+    def parse(self, title, alt, title_en="T", alt_en="A"):
+        return curator.parse_reply(reply_json("river", title, alt, title_en, alt_en), self.ids)
 
     def assert_cut_at_a_word(self, got, original, limit):
         self.assertLessEqual(len(got), limit)
@@ -67,6 +115,7 @@ class ClampTests(unittest.TestCase):
 
     def test_limits(self):
         self.assertEqual((curator.TITLE_MAX, curator.ALT_MAX), (40, 200))
+        self.assertEqual((curator.TITLE_EN_MAX, curator.ALT_EN_MAX), (60, 250))
 
     def test_short_texts_are_kept(self):
         title, alt = "가" * 40, "나" * 200
@@ -81,9 +130,25 @@ class ClampTests(unittest.TestCase):
         self.assert_cut_at_a_word(got["title"], title, 40)
         self.assert_cut_at_a_word(got["alt"], alt, 200)
 
+    def test_english_texts_are_cut_at_a_word(self):
+        title = " ".join(["rain"] * 14) + "x"  # 70 characters
+        alt = (" ".join(["a wet street under tall buildings at night"] * 7))[:300]
+        self.assertEqual((len(title), len(alt)), (70, 300))
+        got = self.parse("가", "나", title, alt)
+        self.assert_cut_at_a_word(got["title_en"], title, 60)
+        self.assert_cut_at_a_word(got["alt_en"], alt, 250)
+        self.assertEqual((got["title"], got["alt"]), ("가", "나"))
+
+    def test_short_english_texts_are_kept(self):
+        title, alt = "t" * 60, "a" * 250
+        got = self.parse("가", "나", title, alt)
+        self.assertEqual((got["title_en"], got["alt_en"]), (title, alt))
+
     def test_one_long_word_is_cut_hard(self):
         got = self.parse("가" * 50, "나" * 250)
         self.assertEqual((got["title"], got["alt"]), ("가" * 40, "나" * 200))
+        got = self.parse("가", "나", "t" * 70, "a" * 300)
+        self.assertEqual((got["title_en"], got["alt_en"]), ("t" * 60, "a" * 250))
 
     def test_no_dangling_comma_or_space(self):
         got = self.parse("가" * 30 + ", " + "나" * 20, "a")
@@ -93,10 +158,13 @@ class ClampTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         img = helpers.make_jpeg(tmp / "t.jpg")
         alt = " ".join(["강 건너 높은 빌딩들이 늘어선 밤의 도시 풍경"] * 10)
-        reply = {"response": json.dumps({"room": "river", "title": "강", "alt": alt}, ensure_ascii=False)}
-        got = curator.draft(img, helpers.SITE, True, post=lambda p, t: reply)["alt"]
-        self.assertTrue(got.endswith(", 흑백 사진"), got)
-        self.assert_cut_at_a_word(got.removesuffix(", 흑백 사진"), alt, 200)
+        alt_en = (" ".join(["a wet street under tall buildings at night"] * 7))[:300]
+        reply = {"response": reply_json("river", "강", alt, "River", alt_en)}
+        got = curator.draft(img, helpers.SITE, True, post=lambda p, t: reply)
+        self.assertTrue(got["alt"].endswith(", 흑백 사진"), got["alt"])
+        self.assert_cut_at_a_word(got["alt"].removesuffix(", 흑백 사진"), alt, 200)
+        self.assertTrue(got["alt_en"].endswith(", black-and-white photo"), got["alt_en"])  # added after the cut, too
+        self.assert_cut_at_a_word(got["alt_en"].removesuffix(", black-and-white photo"), alt_en, 250)
 
 
 class ConfidenceTests(unittest.TestCase):
@@ -120,6 +188,14 @@ class AltTests(unittest.TestCase):
         self.assertEqual(curator.finish_alt("나무 사이로 보이는 강.", True), "나무 사이로 보이는 강, 흑백 사진")
         self.assertEqual(curator.finish_alt("강, 흑백 사진", True), "강, 흑백 사진")
 
+    def test_finish_english(self):
+        self.assertEqual(curator.finish_alt_en("A red booth.", True), "A red booth, black-and-white photo")
+        self.assertEqual(curator.finish_alt_en("A red booth.", False), "A red booth")
+        self.assertEqual(curator.finish_alt_en("A red booth, black-and-white photo", True), "A red booth, black-and-white photo")
+        self.assertEqual(curator.finish_alt_en("A red booth, black-and-white photo.", True), "A red booth, black-and-white photo")
+        self.assertEqual(curator.finish_alt_en("  A  red\n booth ..", True), "A red booth, black-and-white photo")
+        self.assertNotIn("black-and-white", curator.finish_alt_en("A red booth.", False))
+
 
 class DraftTests(unittest.TestCase):
     def setUp(self):
@@ -133,10 +209,28 @@ class DraftTests(unittest.TestCase):
     def test_payload_and_result(self):
         seen = []
         r = curator.draft(self.img, helpers.SITE, True, model="m1",
-                          post=lambda p, t: seen.append(p) or self.reply('{"room": "night", "title": "공중전화", "alt": "부스입니다."}'))
+                          post=lambda p, t: seen.append(p) or self.reply(
+                              reply_json("night", "공중전화", "부스입니다.", "Payphone", "A red booth.")))
         p = seen[0]
         self.assertEqual((p["model"], p["format"], p["think"], p["stream"], p["logprobs"], p["top_logprobs"]), ("m1", "json", False, False, True, 5))
-        self.assertEqual(r, {"room": "night", "title": "공중전화", "alt": "부스, 흑백 사진", "confidence": 0.95, "model": "m1"})
+        self.assertIn("title_en", p["prompt"])
+        self.assertEqual(r, {"room": "night", "title": "공중전화", "alt": "부스, 흑백 사진", "title_en": "Payphone",
+                             "alt_en": "A red booth, black-and-white photo", "confidence": 0.95, "model": "m1"})
+
+    def test_colour_photo_has_no_black_and_white_ending(self):
+        r = curator.draft(self.img, helpers.SITE, False,
+                          post=lambda p, t: self.reply(reply_json("night", "공중전화", "부스입니다.", "Payphone", "A red booth.")))
+        self.assertEqual((r["alt"], r["title_en"], r["alt_en"]), ("부스", "Payphone", "A red booth"))
+
+    def test_a_reply_without_english_is_asked_again(self):
+        replies = iter([self.reply('{"room": "night", "title": "t", "alt": "a"}'),
+                        self.reply(reply_json(title_en="")), self.reply(reply_json())])
+        calls = []
+        r = curator.draft(self.img, helpers.SITE, False, post=lambda p, t: calls.append(1) or next(replies))
+        self.assertEqual((len(calls), r["title_en"], r["alt_en"]), (3, "T", "A"))
+        with self.assertRaises(curator.CuratorError) as cm:
+            curator.draft(self.img, helpers.SITE, False, post=lambda p, t: self.reply('{"room": "night", "title": "t", "alt": "a"}'))
+        self.assertIn("title_en", str(cm.exception))
 
     def test_three_attempts(self):
         calls = []
@@ -145,7 +239,7 @@ class DraftTests(unittest.TestCase):
             calls.append(1)
             if len(calls) < 3:
                 raise curator.CuratorError("끊김")
-            return self.reply('{"room": "night", "title": "t", "alt": "a"}')
+            return self.reply(reply_json())
         self.assertEqual(curator.draft(self.img, helpers.SITE, False, post=flaky)["room"], "night")
         calls.clear()
         with self.assertRaises(curator.CuratorError):
@@ -162,12 +256,12 @@ class DraftTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_unknown_room_zero(self):
-        r = curator.draft(self.img, helpers.SITE, False, post=lambda p, t: self.reply('{"room": "moon", "title": "t", "alt": "a"}'))
+        r = curator.draft(self.img, helpers.SITE, False, post=lambda p, t: self.reply(reply_json("moon")))
         self.assertEqual((r["room"], r["confidence"]), ("river", 0.0))
         self.assertIs(type(r["confidence"]), int)
 
     def test_confidence_is_int_when_whole(self):
-        sure = {"response": '{"room": "night", "title": "t", "alt": "a"}',
+        sure = {"response": reply_json(),
                 "logprobs": [tok('{"room": "'), tok("night", [("night", 1.0)])]}
         r = curator.draft(self.img, helpers.SITE, False, post=lambda p, t: sure)
         self.assertEqual(r["confidence"], 1)
@@ -260,7 +354,7 @@ class TransportTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         img = helpers.make_jpeg(tmp / "t.jpg")
-        good = json.dumps({"response": '{"room": "night", "title": "공중전화", "alt": "부스"}'})
+        good = json.dumps({"response": reply_json("night", "공중전화", "부스", "Payphone", "A booth")})
         calls = []
 
         def flaky_urlopen(request, timeout):
@@ -270,7 +364,7 @@ class TransportTests(unittest.TestCase):
             return io.BytesIO(good.encode("utf-8"))
         with mock.patch.object(curator.urllib.request, "urlopen", flaky_urlopen):
             r = curator.draft(img, helpers.SITE, False, model="m")
-        self.assertEqual((r["room"], r["title"], len(calls)), ("night", "공중전화", 3))
+        self.assertEqual((r["room"], r["title"], r["title_en"], len(calls)), ("night", "공중전화", "Payphone", 3))
 
 
 class PromptReplyTests(unittest.TestCase):
@@ -332,7 +426,8 @@ def claude_response(reply=None, *, text=None, stop_reason="end_turn", model="cla
     return SimpleNamespace(stop_reason=stop_reason, model=model, content=content)
 
 
-GOOD_REPLY = {"room": "night", "title": "공중전화", "alt": "빨간 공중전화 부스", "confidence": 0.9}
+GOOD_REPLY = {"room": "night", "title": "공중전화", "alt": "빨간 공중전화 부스", "title_en": "Payphone",
+              "alt_en": "A red payphone booth", "confidence": 0.9}
 
 
 class ClaudeDraftTests(unittest.TestCase):
@@ -373,10 +468,11 @@ class ClaudeDraftTests(unittest.TestCase):
         self.assertEqual(kw["output_config"]["format"]["type"], "json_schema")
         schema = kw["output_config"]["format"]["schema"]
         self.assertEqual(schema["properties"]["room"]["enum"], [room["id"] for room in helpers.SITE["rooms"]])
-        self.assertEqual(set(schema["properties"]), {"room", "title", "alt", "confidence"})
+        self.assertEqual(set(schema["properties"]), {"room", "title", "alt", "title_en", "alt_en", "confidence"})
         self.assertEqual({key: schema["properties"][key]["type"] for key in schema["properties"]},
-                         {"room": "string", "title": "string", "alt": "string", "confidence": "number"})
-        self.assertEqual(schema["required"], ["room", "title", "alt", "confidence"])
+                         {"room": "string", "title": "string", "alt": "string", "title_en": "string", "alt_en": "string",
+                          "confidence": "number"})
+        self.assertEqual(schema["required"], ["room", "title", "alt", "title_en", "alt_en", "confidence"])
         self.assertIs(schema["additionalProperties"], False)
         self.assertNotIn("thinking", kw)  # Opus 5.5 always thinks and rejects the parameter
         self.assertNotIn("temperature", kw)
@@ -388,8 +484,20 @@ class ClaudeDraftTests(unittest.TestCase):
         self.assertEqual(text["type"], "text")
         self.assertIn("장소의 이름을 쓰지 마세요", text["text"])
         self.assertIn("confidence", text["text"])
+        self.assertIn("title_en", text["text"])
+        self.assertIn("alt_en", text["text"])
+        self.assertIn("영어 제목은 2~6단어의 짧은 명사구", text["text"])
         self.assertNotIn("JSON으로만 답하세요", text["text"])
         self.assertEqual(got["model"], "claude-opus-5-5")
+
+    def test_schema(self):
+        schema = curator.claude_schema(["river"])
+        self.assertEqual(schema["required"], ["room", "title", "alt", "title_en", "alt_en", "confidence"])
+        self.assertEqual(schema["properties"]["title_en"], {"type": "string"})
+        self.assertEqual(schema["properties"]["alt_en"], {"type": "string"})
+        self.assertEqual(schema["properties"]["room"], {"type": "string", "enum": ["river"]})
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertEqual(set(schema["properties"]), set(schema["required"]))  # every property is required
 
     def test_model_from_environment(self):
         os.environ["NOCTURNE_CLAUDE_MODEL"] = "claude-sonnet-5-5"
@@ -405,13 +513,27 @@ class ClaudeDraftTests(unittest.TestCase):
 
     def test_reply_is_tidied(self):
         title = "  공중전화 부스가 있는 비 내린 밤거리의 아주 긴 제목이 계속 이어집니다 그리고 더 이어집니다 "
-        reply = {"room": "night", "title": title, "alt": "빨간 공중전화 부스입니다.", "confidence": 0.65}
+        title_en = "  A red payphone booth on a rainy night street with a very long title that goes on and on  "
+        reply = {"room": "night", "title": title, "alt": "빨간 공중전화 부스입니다.", "title_en": title_en,
+                 "alt_en": "  A red payphone booth.  ", "confidence": 0.65}
         got, _ = self.draft(claude_response(reply), grayscale=True)
         self.assertGreater(len(title.strip()), 40)
         self.assertEqual(got["title"], curator.clamp(title.strip(), 40))
         self.assertLessEqual(len(got["title"]), 40)
+        self.assertGreater(len(title_en.strip()), 60)
+        self.assertEqual(got["title_en"], curator.clamp(title_en.strip(), 60))
+        self.assertLessEqual(len(got["title_en"]), 60)
         self.assertEqual(got, {"room": "night", "title": got["title"], "alt": "빨간 공중전화 부스, 흑백 사진",
+                               "title_en": got["title_en"], "alt_en": "A red payphone booth, black-and-white photo",
                                "confidence": 0.65, "model": "claude-opus-5-5"})
+
+    def test_colour_photo_has_no_black_and_white_ending(self):
+        got, _ = self.draft(claude_response(dict(GOOD_REPLY, alt_en="A red payphone booth.")))
+        self.assertEqual((got["alt"], got["title_en"], got["alt_en"]), ("빨간 공중전화 부스", "Payphone", "A red payphone booth"))
+
+    def test_the_grayscale_ending_is_not_added_twice(self):
+        got, _ = self.draft(claude_response(dict(GOOD_REPLY, alt_en="A red booth, black-and-white photo")), grayscale=True)
+        self.assertEqual(got["alt_en"], "A red booth, black-and-white photo")
 
     def test_fallback_model_is_recorded(self):
         got, _ = self.draft(claude_response(GOOD_REPLY, model="claude-opus-4-8"))
@@ -510,6 +632,10 @@ class ClaudeDraftTests(unittest.TestCase):
             claude_response(dict(GOOD_REPLY, title="")),
             claude_response(dict(GOOD_REPLY, title="   ")),
             claude_response(dict(GOOD_REPLY, alt="")),
+            claude_response(dict(GOOD_REPLY, title_en="")),
+            claude_response(dict(GOOD_REPLY, alt_en="   ")),
+            claude_response({k: v for k, v in GOOD_REPLY.items() if k != "title_en"}),
+            claude_response({k: v for k, v in GOOD_REPLY.items() if k != "alt_en"}),
             claude_response(blocks=[]),
             claude_response(blocks=[SimpleNamespace(type="thinking", thinking="…")]),
         ]
@@ -563,7 +689,8 @@ class FakeAITests(unittest.TestCase):
     def test_fake(self):
         ai = helpers.FakeAI(room="river", confidence=0.5)
         self.assertEqual(ai(Path("x.jpg"), helpers.SITE, False, model="mm"),
-                         {"room": "river", "title": "초안", "alt": "초안 설명", "confidence": 0.5, "model": "mm"})
+                         {"room": "river", "title": "초안", "alt": "초안 설명", "title_en": "Draft",
+                          "alt_en": "A draft description", "confidence": 0.5, "model": "mm"})
         self.assertEqual(ai(Path("x.jpg"), helpers.SITE, False)["model"], "fake")
         self.assertEqual(ai.calls, 2)
         with self.assertRaises(curator.CuratorError):

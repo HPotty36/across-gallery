@@ -43,7 +43,8 @@ class FakeClaude:
         self.asked.append(model)
         if self.fail:
             raise curator.CuratorError(self.fail)
-        return {"room": "night", "title": "클로드 초안", "alt": "클로드 설명", "confidence": 0.9, "model": self.answered_by}
+        return {"room": "night", "title": "클로드 초안", "alt": "클로드 설명", "title_en": "Claude draft",
+                "alt_en": "A description by Claude", "confidence": 0.9, "model": self.answered_by}
 
 
 class UploadingClaude(FakeClaude):
@@ -128,7 +129,9 @@ class WorkerTests(FakeRepo, unittest.TestCase):
         self.assertEqual(self.w.process("a"), "published")
         self.assertEqual(self.fake.commits(R), before + 2)                 # 맡음 + 게시
         _, p = photolib.find_photo(self.photos(), "a")
-        self.assertEqual((p["title"], p["date"], p["ai"]), ("초안", "2025.11.30", {"model": "gemma4:12b-it-qat", "fields": ["title", "alt"], "confidence": 0.95}))
+        self.assertEqual((p["title"], p["date"], p["ai"]),
+                         ("초안", "2025.11.30", {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.95}))
+        self.assertEqual((p["title_en"], p["alt_en"]), ("Draft", "A draft description"))
         self.assertEqual(self.fake.read_file(R, "photos/full/a.jpg"), self.full_bytes["a"])
         self.assertEqual([k for k in self.fake.files(R) if k.startswith("queue/a")], [])
     def test_low_confidence_still_published(self):
@@ -160,11 +163,14 @@ class WorkerTests(FakeRepo, unittest.TestCase):
         self.fake.put_file(R, "queue/redraft-n1/item.json", json.dumps(queue_items.new_item("redraft-n1", kind="redraft", grayscale=False, now=UPLOADED, file="n1")).encode())
         self.assertEqual(self.w.process("redraft-n1"), "published")
         _, p = photolib.find_photo(self.photos(), "n1")
-        self.assertEqual((p["title"], p["ai"]["fields"]), ("초안", ["title", "alt"]))
+        self.assertEqual((p["title"], p["title_en"], p["alt_en"], p["ai"]["fields"]),
+                         ("초안", "Draft", "A draft description", ["title", "alt", "title_en", "alt_en"]))
     def test_upgrade(self):
         self.assertEqual(self.w.upgrade_one(), ("upgraded", "a2"))
         _, p = photolib.find_photo(self.photos(), "a2")
         self.assertEqual((p["title"], p["ai"]["model"], p["ai"]["confidence"]), ("초안", "gemma4:12b-it-qat", 0.61))
+        self.assertNotIn("title_en", p)  # a2's ai.fields name no English text, so the upgrade adds none
+        self.assertEqual(p["ai"]["fields"], ["title", "alt"])
         self.assertEqual(photolib.find_photo(self.photos(), "a2")[0]["id"], "river")
         self.assertIsNone(self.w.upgrade_one())
     def test_upgrade_respects_edit_made_meanwhile(self):
@@ -198,8 +204,9 @@ class PublishTests(FakeRepo, unittest.TestCase):
         self.assertEqual(text, photolib.dumps_data(self.photos()))  # canonical form
         night = self.photos()["rooms"][1]["photos"]
         self.assertEqual(json.dumps(night[-1], ensure_ascii=False, separators=(",", ":")),
-                         '{"file":"a","title":"초안","alt":"초안 설명","date":"2025.11.30","camera":"TestCam · f/1.6",'
-                         '"ai":{"model":"gemma4:12b-it-qat","fields":["title","alt"],"confidence":0.95}}')
+                         '{"file":"a","title":"초안","alt":"초안 설명","title_en":"Draft","alt_en":"A draft description",'
+                         '"date":"2025.11.30","camera":"TestCam · f/1.6",'
+                         '"ai":{"model":"gemma4:12b-it-qat","fields":["title","alt","title_en","alt_en"],"confidence":0.95}}')
         self.assertEqual(self.fake.read_file(R, "photos/thumb/a.jpg"), self.thumb_bytes["a"])
         self.assertEqual(self.messages(2), ["사진 게시: 초안", "대기열: a PC가 맡음"])
         self.assertEqual(list(self.work.iterdir()), [])  # the temporary image is gone
@@ -213,7 +220,8 @@ class PublishTests(FakeRepo, unittest.TestCase):
         self.put_item("a"); self.w.drafter = FakeAI(confidence=None)
         self.assertEqual(self.w.process("a"), "published")
         self.assertEqual(photolib.find_photo(self.photos(), "a")[1],
-                         {"file": "a", "title": "초안", "alt": "초안 설명", "ai": {"model": "gemma4:12b-it-qat", "fields": ["title", "alt"]}})
+                         {"file": "a", "title": "초안", "alt": "초안 설명", "title_en": "Draft", "alt_en": "A draft description",
+                          "ai": {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"]}})
     def test_failure_message_and_files_kept(self):
         self.as_github(); self.put_item("a"); self.w.drafter = FakeAI(fail=True)
         self.assertEqual(self.w.process("a"), "failed")
@@ -273,7 +281,8 @@ class PublishTests(FakeRepo, unittest.TestCase):
         self.assertEqual(self.w.process("redraft-a2"), "published")
         room, p = photolib.find_photo(self.photos(), "a2")
         self.assertEqual((room["id"], p["title"], p["alt"], p["ai"]), ("river", "초안", "초안 설명",
-                                                                       {"model": "gemma4:12b-it-qat", "fields": ["title", "alt"], "confidence": 0.61}))
+                                                                       {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.61}))
+        self.assertEqual((p["title_en"], p["alt_en"]), ("Draft", "A draft description"))  # a2 had no English before
         self.assertTrue(seen[0]["grayscale"])  # judged from the thumbnail
         self.assertEqual(self.messages(2), ["AI 설명 다시 쓰기: 초안", "대기열: redraft-a2 PC가 맡음"])
         self.assertEqual((self.queue_files("redraft-a2"), list(self.work.iterdir())), ([], []))
@@ -608,16 +617,37 @@ class RedraftEditTests(FakeRepo, unittest.TestCase):
         # edited straight in photos.json, so ai.fields still lists the title: it must not stay marked as AI text
         room, p = self.redraft("a2", lambda p: p.update(title="내가 고침"))
         self.assertEqual((room["id"], p["title"], p["alt"], p["ai"]),
-                         ("river", "내가 고침", "초안 설명", {"model": "gemma4:12b-it-qat", "fields": ["alt"], "confidence": 0.61}))
+                         ("river", "내가 고침", "초안 설명",
+                          {"model": "gemma4:12b-it-qat", "fields": ["alt", "title_en", "alt_en"], "confidence": 0.61}))
     def test_a_photo_without_ai_record(self):
         _, p = self.redraft("n1", lambda p: p.update(alt="내 설명"))
         self.assertEqual(p, {"file": "n1", "title": "초안", "alt": "내 설명", "date": "2025.11.30",
-                             "title_en": "Payphone", "alt_en": "A red payphone booth",
-                             "ai": {"model": "gemma4:12b-it-qat", "fields": ["title"]}})
-    def test_both_changed_meanwhile_only_removes_the_request(self):
+                             "title_en": "Draft", "alt_en": "A draft description",
+                             "ai": {"model": "gemma4:12b-it-qat", "fields": ["title", "title_en", "alt_en"]}})
+    def test_a_photo_without_english_gets_it(self):
+        # nothing changed since the request, and a field that is missing both times is the same, so English is written
+        _, p = self.redraft("a2", lambda p: None)
+        self.assertEqual((p["title"], p["alt"], p["title_en"], p["alt_en"]), ("초안", "초안 설명", "Draft", "A draft description"))
+        self.assertEqual(p["ai"], {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.61})
+    def test_an_english_title_changed_meanwhile_is_kept(self):
+        _, p = self.redraft("n1", lambda p: p.update(title_en="My title"))
+        self.assertEqual(p, {"file": "n1", "title": "초안", "alt": "초안 설명", "date": "2025.11.30",
+                             "title_en": "My title", "alt_en": "A draft description",
+                             "ai": {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "alt_en"]}})
+    def test_english_added_by_a_person_meanwhile_is_kept(self):
+        # a2 had no English when the request was read; a person gave it a title meanwhile
+        _, p = self.redraft("a2", lambda p: p.update(title_en="Under the bridge"))
+        self.assertEqual((p["title"], p["title_en"], p["alt_en"]), ("초안", "Under the bridge", "A draft description"))
+        self.assertEqual(p["ai"], {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "alt_en"], "confidence": 0.61})
+    def test_the_texts_changed_meanwhile_are_all_kept(self):
+        mine = {"title": "내 제목", "alt": "내 설명", "title_en": "My title", "alt_en": "My description"}
+        _, p = self.redraft("n1", lambda p: p.update(mine))
+        self.assertEqual(p, {"file": "n1", "date": "2025.11.30", **mine})  # only the request is removed
+    def test_korean_changed_meanwhile_still_rewrites_the_english(self):
         _, p = self.redraft("n1", lambda p: p.update(title="내 제목", alt="내 설명"))
         self.assertEqual(p, {"file": "n1", "title": "내 제목", "alt": "내 설명", "date": "2025.11.30",
-                             "title_en": "Payphone", "alt_en": "A red payphone booth"})
+                             "title_en": "Draft", "alt_en": "A draft description",
+                             "ai": {"model": "gemma4:12b-it-qat", "fields": ["title_en", "alt_en"]}})
 
 
 class TakeableTests(FakeRepo, unittest.TestCase):
@@ -703,6 +733,39 @@ class UpgradeTests(FakeRepo, unittest.TestCase):
         self.assertEqual((room["id"], p["title"], p["alt"], p["ai"]),
                          ("river", "사람 제목", "초안 설명", {"model": "gemma4:12b-it-qat", "fields": ["alt"], "confidence": 0.5}))
         self.assertEqual(self.messages(1), ["AI 설명 개선: 사람 제목"])
+    def test_english_fields_are_upgraded_when_they_are_still_the_models(self):
+        self.edit(lambda d: d["rooms"][0]["photos"][1].update(
+            title_en="E4B title", alt_en="E4B description", ai={"model": "gemma4:e4b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.5}))
+        self.assertEqual(self.w.upgrade_one(), ("upgraded", "a2"))
+        room, p = photolib.find_photo(self.photos(), "a2")
+        self.assertEqual((room["id"], p["title"], p["alt"], p["title_en"], p["alt_en"]),
+                         ("river", "초안", "초안 설명", "Draft", "A draft description"))
+        self.assertEqual(p["ai"], {"model": "gemma4:12b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.5})
+        self.assertEqual(self.messages(1), ["AI 설명 개선: 초안"])
+    def test_only_the_english_fields_a_person_left_are_upgraded(self):
+        # a person wrote the Korean texts and the English title; only the English description is still the model's
+        self.edit(lambda d: d["rooms"][0]["photos"][1].update(
+            title="사람 제목", alt="사람 설명", title_en="My title", alt_en="E4B description",
+            ai={"model": "gemma4:e4b-it-qat", "fields": ["alt_en"], "confidence": 0.5}))
+        self.assertEqual(self.w.upgrade_one(), ("upgraded", "a2"))
+        _, p = photolib.find_photo(self.photos(), "a2")
+        self.assertEqual(p, {"file": "a2", "title": "사람 제목", "alt": "사람 설명", "title_en": "My title", "alt_en": "A draft description",
+                             "ai": {"model": "gemma4:12b-it-qat", "fields": ["alt_en"], "confidence": 0.5}})
+        self.assertEqual(self.messages(1), ["AI 설명 개선: 사람 제목"])
+    def test_an_english_field_edited_meanwhile_is_not_upgraded(self):
+        def by_a_person(d):
+            photolib.find_photo(d, "a2")[1]["ai"]["fields"] = ["title", "alt"]  # what the admin page's save leaves
+        self.edit(lambda d: d["rooms"][0]["photos"][1].update(
+            title_en="E4B title", alt_en="E4B description", ai={"model": "gemma4:e4b-it-qat", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.5}))
+        real = self.w.drafter
+        def edited(*a, **kw):
+            self.edit(by_a_person)
+            return real(*a, **kw)
+        self.w.drafter = edited
+        self.assertEqual(self.w.upgrade_one(), ("upgraded", "a2"))
+        _, p = photolib.find_photo(self.photos(), "a2")
+        self.assertEqual((p["title"], p["title_en"], p["alt_en"]), ("초안", "E4B title", "E4B description"))
+        self.assertEqual(p["ai"]["fields"], ["title", "alt"])
     def test_person_edited_everything_meanwhile(self):
         def by_a_person(d):
             p = d["rooms"][0]["photos"][1]
@@ -849,7 +912,8 @@ class MainTests(FakeRepo, unittest.TestCase):
         self.assertEqual(claude.asked, ["claude-opus-5-5"])
         _, p = photolib.find_photo(self.photos(), "a")
         self.assertEqual((p["title"], p["alt"], p["ai"]),
-                         ("클로드 초안", "클로드 설명", {"model": "claude-opus-4-8", "fields": ["title", "alt"], "confidence": 0.9}))
+                         ("클로드 초안", "클로드 설명", {"model": "claude-opus-4-8", "fields": ["title", "alt", "title_en", "alt_en"], "confidence": 0.9}))
+        self.assertEqual((p["title_en"], p["alt_en"]), ("Claude draft", "A description by Claude"))
         self.assertEqual(self.messages(2), ["사진 게시: 클로드 초안", "대기열: a GitHub가 맡음"])
     def test_claude_failure_hands_off_with_a_warning_and_the_ollama_pass_takes_it(self):
         self.put_item("a")

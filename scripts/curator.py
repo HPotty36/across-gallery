@@ -1,4 +1,4 @@
-"""Curator: an AI drafts the room, title and alt text of a photo.
+"""Curator: an AI drafts the room, title and alt text of a photo, in Korean and in English.
 
 Two drafters with the same call shape and result: `draft` asks a local vision model (Ollama), `claude_draft` asks
 the Claude API. Standard library only, except that `claude_draft` imports the `anthropic` SDK (requirements-ai.txt)
@@ -28,6 +28,8 @@ CONFIDENT = 0.8  # room confidence at or above this is trusted without a second 
 ATTEMPTS = 3  # this PC's Ollama sometimes drops a request right after generating; a retry works
 TITLE_MAX = 40  # characters; the prompt asks for 2 to 8, this only stops a rambling reply
 ALT_MAX = 200  # characters, before ", 흑백 사진" is added
+TITLE_EN_MAX = 60  # characters; the prompt asks for 2 to 6 words
+ALT_EN_MAX = 250  # characters, before ", black-and-white photo" is added
 
 OFF_MESSAGE = "Ollama가 꺼져 있어요. Ollama를 켠 뒤 다시 시도하거나 직접 입력하세요."
 CLAUDE_NO_KEY = "Claude API 키가 없어요"
@@ -47,14 +49,16 @@ CLAUDE_ERROR_TYPES = frozenset({"invalid_request_error", "authentication_error",
                                 "request_too_large", "rate_limit_error", "api_error", "overloaded_error", "billing_error"})
 _REQUEST_ID = re.compile(r"req_[A-Za-z0-9]+")
 
-PROMPT_HEAD = "당신은 사진 전시 사이트의 큐레이터입니다. 이 사진을 아래 방 중 하나에 걸고, 한국어 제목과 대체 텍스트(alt)를 쓰세요."
+PROMPT_HEAD = ("당신은 사진 전시 사이트의 큐레이터입니다. 이 사진을 아래 방 중 하나에 걸고, 한국어 제목과 대체 텍스트(alt), "
+               "그리고 같은 뜻의 영어 제목(title_en)과 영어 대체 텍스트(alt_en)를 쓰세요.")
 PROMPT_RULES = """규칙:
 - 제목은 2~8글자의 짧은 명사구.
 - alt는 화면 낭독기용으로, 무엇이 찍혔는지 한 문장. "입니다"나 마침표로 끝내지 마세요.
 - 방 설명 문구를 그대로 옮기지 말고, 이 사진에 보이는 것을 쓰세요.
 - 도시, 건물, 경기장, 다리 같은 장소의 이름을 쓰지 마세요. 사진만 보고 장소를 짐작하지 마세요.
-- 흑백인지 컬러인지는 쓰지 마세요."""
-PROMPT_REPLY = 'JSON으로만 답하세요: {"room": "<방 id>", "title": "...", "alt": "..."}'
+- 흑백인지 컬러인지는 쓰지 마세요.
+- 영어 제목은 2~6단어의 짧은 명사구, 영어 alt는 무엇이 찍혔는지 한 문장이고 마침표로 끝내지 마세요. 영어에도 위 규칙(장소 이름, 흑백)을 똑같이 지키세요."""
+PROMPT_REPLY = 'JSON으로만 답하세요: {"room": "<방 id>", "title": "...", "alt": "...", "title_en": "...", "alt_en": "..."}'
 CLAUDE_REPLY = "confidence에는 고른 방이 맞다고 얼마나 확신하는지 0에서 1 사이의 숫자를 쓰세요."
 
 
@@ -76,10 +80,18 @@ def claude_model_name():
 
 # --- prompt and reply ------------------------------------------------------------------------
 
+def _example(room, photo):
+    """One example line: "- [방] 제목 / alt", and " | English title / English alt" after it when the photo has both."""
+    line = f"- [{room['name']}] {photo['title']} / {photo['alt']}"
+    if photo.get("title_en") and photo.get("alt_en"):
+        line += f" | {photo['title_en']} / {photo['alt_en']}"
+    return line
+
+
 def build_prompt(data, reply=PROMPT_REPLY):
     """The instructions for a model; `reply` is the last line, which says how to answer (Ollama and Claude differ)."""
     rooms = data["rooms"]
-    examples = [f"- [{room['name']}] {p['title']} / {p['alt']}" for room in rooms for p in room["photos"][:2]]
+    examples = [_example(room, p) for room in rooms for p in room["photos"][:2]]
     parts = [PROMPT_HEAD, "방:\n" + "\n".join(f"- {r['id']} ({r['name']}): {r['note']}" for r in rooms)]
     if examples:
         parts.append("기존 사진의 제목과 alt 예시 (말투를 맞추세요):\n" + "\n".join(examples))
@@ -113,11 +125,12 @@ def _load_reply(text):
 
 
 def parse_reply(text, room_ids):
-    """{"room", "title", "alt", "known"} from the model's JSON; an unknown room falls back to the first one.
-    The title is cut to TITLE_MAX characters and the alt to ALT_MAX (see clamp)."""
+    """{"room", "title", "alt", "title_en", "alt_en", "known"} from the model's JSON; an unknown room falls back to the
+    first one. All four texts must be there and not blank. They are cut to TITLE_MAX, ALT_MAX, TITLE_EN_MAX and
+    ALT_EN_MAX characters (see clamp)."""
     reply = _load_reply(text)
     fields = {}
-    for key in ("title", "alt"):
+    for key in ("title", "alt", "title_en", "alt_en"):
         value = reply.get(key)
         fields[key] = value.strip() if isinstance(value, str) else ""
         if not fields[key]:
@@ -126,7 +139,8 @@ def parse_reply(text, room_ids):
     room = room.strip() if isinstance(room, str) else ""
     known = room in room_ids
     return {"room": room if known else room_ids[0], "title": clamp(fields["title"], TITLE_MAX),
-            "alt": clamp(fields["alt"], ALT_MAX), "known": known}
+            "alt": clamp(fields["alt"], ALT_MAX), "title_en": clamp(fields["title_en"], TITLE_EN_MAX),
+            "alt_en": clamp(fields["alt_en"], ALT_EN_MAX), "known": known}
 
 
 def _tidy(value):
@@ -160,6 +174,14 @@ def finish_alt(alt, grayscale):
     if grayscale and not alt.endswith("흑백 사진"):
         alt += ", 흑백 사진"
     return alt
+
+
+def finish_alt_en(alt_en, grayscale):
+    """English alt without a closing period, and ', black-and-white photo' appended for black-and-white photos."""
+    alt_en = " ".join(alt_en.split()).rstrip(" .")
+    if grayscale and not alt_en.endswith("black-and-white photo"):
+        alt_en += ", black-and-white photo"
+    return alt_en
 
 
 # --- talking to Ollama -------------------------------------------------------------------------
@@ -216,7 +238,8 @@ def status(*, get=None, model=None):
 
 
 def draft(image, data, grayscale, *, post=None, model=None):
-    """Ask the model for {"room", "title", "alt", "confidence", "model"}; confidence is None without logprobs."""
+    """Ask the model for {"room", "title", "alt", "title_en", "alt_en", "confidence", "model"}; confidence is None
+    without logprobs."""
     model = model or model_name()
     post = post or _post
     room_ids = [room["id"] for room in data["rooms"]]
@@ -245,6 +268,7 @@ def draft(image, data, grayscale, *, post=None, model=None):
         else:
             confidence = room_confidence(reply.get("logprobs"), parsed["room"]) if parsed["known"] else 0
             return {"room": parsed["room"], "title": parsed["title"], "alt": finish_alt(parsed["alt"], grayscale),
+                    "title_en": parsed["title_en"], "alt_en": finish_alt_en(parsed["alt_en"], grayscale),
                     "confidence": confidence, "model": model}
     raise CuratorError(f"AI가 답을 주지 못했어요: {cause}")
 
@@ -255,8 +279,9 @@ def claude_schema(room_ids):
     """The JSON Schema the reply must follow: the room is one of the ids, and nothing else is added."""
     return {"type": "object",
             "properties": {"room": {"type": "string", "enum": list(room_ids)}, "title": {"type": "string"},
-                           "alt": {"type": "string"}, "confidence": {"type": "number"}},
-            "required": ["room", "title", "alt", "confidence"],
+                           "alt": {"type": "string"}, "title_en": {"type": "string"}, "alt_en": {"type": "string"},
+                           "confidence": {"type": "number"}},
+            "required": ["room", "title", "alt", "title_en", "alt_en", "confidence"],
             "additionalProperties": False}
 
 
@@ -320,9 +345,10 @@ def is_claude_failure(message):
 
 
 def claude_draft(image, data, grayscale, *, model=None, client=None):
-    """Like `draft`, but the Claude API answers: {"room", "title", "alt", "confidence", "model"}. One request (the SDK
-    retries transient failures itself). Every failure is a CuratorError with a short Korean message, never the SDK's
-    text or the reply. `model` in the result is the model that really answered, which may be a fallback."""
+    """Like `draft`, but the Claude API answers: {"room", "title", "alt", "title_en", "alt_en", "confidence", "model"}.
+    One request (the SDK retries transient failures itself). Every failure is a CuratorError with a short Korean
+    message, never the SDK's text or the reply. `model` in the result is the model that really answered, which may be
+    a fallback."""
     model = model or claude_model_name()
     if client is None:
         client = _claude_client()
@@ -359,4 +385,5 @@ def claude_draft(image, data, grayscale, *, model=None, client=None):
     if not parsed["known"]:
         raise _unreadable("모르는 방이에요")
     return {"room": parsed["room"], "title": parsed["title"], "alt": finish_alt(parsed["alt"], grayscale),
+            "title_en": parsed["title_en"], "alt_en": finish_alt_en(parsed["alt_en"], grayscale),
             "confidence": claude_confidence(reply.get("confidence")), "model": getattr(response, "model", None) or model}

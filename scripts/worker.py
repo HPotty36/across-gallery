@@ -220,7 +220,8 @@ class Worker:
             if not redraft:
                 if name in photolib.listed(current):
                     raise photolib.PhotoError(NAME_TAKEN)
-                entry = {"file": name, "title": draft["title"], "alt": draft["alt"]}
+                entry = {"file": name, "title": draft["title"], "alt": draft["alt"],
+                         "title_en": draft["title_en"], "alt_en": draft["alt_en"]}
                 entry.update({key: claimed[key] for key in ("date", "camera") if claimed.get(key)})
                 entry["ai"] = photolib.ai_entry(draft["model"], draft["confidence"])
                 photolib.add_photo(current, draft["room"], entry)  # PhotoError if the room is gone

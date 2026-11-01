@@ -169,7 +169,7 @@ class FakeAI:
         self.calls += 1
         if self.fail:
             raise curator.CuratorError("Ollama가 꺼져 있어요. Ollama를 켠 뒤 다시 시도하거나 직접 입력하세요.")
-        return {"room": self.room, "title": "초안", "alt": "초안 설명",
+        return {"room": self.room, "title": "초안", "alt": "초안 설명", "title_en": "Draft", "alt_en": "A draft description",
                 "confidence": self.confidence, "model": model or "fake"}
 
 

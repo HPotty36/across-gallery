@@ -13,7 +13,7 @@ from PIL import ExifTags, Image, ImageOps
 # name -> (long edge in px, JPEG quality)
 SIZES = {"thumb": (1000, 78), "full": (2400, 84)}
 
-AI_FIELDS = ("title", "alt")  # the photo texts an AI may write, in the order ai.fields lists them
+AI_FIELDS = ("title", "alt", "title_en", "alt_en")  # the photo texts an AI may write, in the order ai.fields lists them
 
 GRAY_MEAN_LIMIT = 4  # average chroma must stay below this
 GRAY_EDGE_LIMIT = 16  # chroma at the 99th percentile must stay below this
@@ -206,7 +206,7 @@ def needs_upgrade(photo, from_models):
 def apply_ai_text(photo, texts, model, fields):
     """Replace only `fields` with texts[field] and record model as their author.
 
-    ai.fields becomes the old fields plus `fields` (title, alt order); other ai keys stay.
+    ai.fields becomes the old fields plus `fields`, in AI_FIELDS order; other ai keys stay.
     """
     for field in fields:
         photo[field] = texts[field]

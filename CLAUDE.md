@@ -1,6 +1,6 @@
 # Nocturne — 사진 전시 사이트
 
-직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. AI는 GitHub Actions에서 Claude API(`claude-opus-5-5`, Max 요금제에 딸린 API 크레딧으로)를 쓴다. Claude가 못 쓰면 같은 실행에서 Ollama의 e4b가, Actions가 돌지 못하면 집 PC의 Ollama(12B)가 대신 쓴다. 사이트는 `index.html`(한국어)과 `en/index.html`(영어), `photos/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
+직접 찍은 사진을 "방"(강, 경기장, 밤, 순간)으로 나눠 어두운 전시실처럼 거는 정적 사이트. 폰이나 PC 브라우저의 관리 페이지에서 사진을 올리면 AI가 방을 고르고 제목·설명(한국어와 영어)을 써서 바로 게시하고, 사람은 나중에 관리 페이지에서 고치거나 지운다. AI는 GitHub Actions에서 Claude API(`claude-opus-5-5`, Max 요금제에 딸린 API 크레딧으로)를 쓴다. Claude가 못 쓰면 같은 실행에서 Ollama의 e4b가, Actions가 돌지 못하면 집 PC의 Ollama(12B)가 대신 쓴다. 사이트는 `index.html`(한국어)과 `en/index.html`(영어), `photos/`, `admin/`뿐이라 GitHub Pages에 그대로 올라간다.
 
 ## 구조
 
@@ -21,7 +21,7 @@ scripts/
   photolib.py            이름 규칙, EXIF 힌트, 흑백 판별, 메타데이터 없는 사본, photos.json 읽기·쓰기, ai 함수
   build.py               template + photos.json -> index.html (한국어)와 en/index.html (영어). --out 이면 _site 조립
   prepare_photos.py      originals/ 의 원본을 웹용 사본으로 변환 (명령줄 흐름)
-  curator.py             Claude API나 Ollama에게 방·제목·설명 초안 요청, 확신도, alt 후처리
+  curator.py             Claude API나 Ollama에게 방·제목·설명(한국어와 영어) 초안 요청, 확신도, alt 후처리
   queue_items.py         item.json 형식과 누가 맡을 수 있는지 규칙
   github_api.py          표준 urllib GitHub 클라이언트 (파일 읽기·쓰기, 한 커밋 쓰기)
   worker.py              대기열 항목 맡기 -> 초안 -> 한 커밋 게시, 다듬기; Actions용 --check / --run (--ai claude|ollama)
@@ -93,7 +93,7 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
    - 올림 커밋이 push되면 GitHub Actions(`draft.yml`)가 바로 맡아 Claude(`claude-opus-5-5`)로 초안을 쓴다.
    - Claude가 못 쓴 사진은 같은 실행에서 e4b(`gemma4:e4b-it-qat`, Ollama)가 이어서 쓴다. Claude API 키를 넣기 전에는 e4b가 전부 쓴다.
    - 올린 지 5분이 지나도 아무도 맡지 않은 사진(Draft가 꺼짐, GitHub 장애 등)은 집 PC 도우미가 맡아 12B(`gemma4:12b-it-qat`)로 쓴다. PC가 켜져 있고 Ollama가 돌 때만.
-4. 초안(방, 제목, alt)을 쓰면 누가 썼든 사람 확인 없이 바로 게시한다: 사진 두 장 이동 + `photos.json` 추가 + 대기열 삭제가 한 커밋. `site.yml`이 사이트를 다시 만든다 (1~2분).
+4. 초안(방, 제목, alt와 영어 제목, 영어 alt)을 쓰면 누가 썼든 사람 확인 없이 바로 게시한다: 사진 두 장 이동 + `photos.json` 추가 + 대기열 삭제가 한 커밋. `site.yml`이 사이트를 다시 만든다 (1~2분).
 5. 잘못된 건 관리 페이지의 **전시 중** 탭에서 고친다 (방, 제목, 설명 저장 / AI로 다시 쓰기 / 대표 지정 / 삭제). 방 배정 확신도가 0.8 미만이면 "확인 필요" 배지가 붙는다.
 6. Claude가 못 쓰면 같은 실행의 e4b가, PC의 AI가 못 쓰면 GitHub가 이어서 맡는다 (그 사진은 다시 대기로 돌아간다). e4b도 실패한 사진은 **새 사진** 탭에 남는다: 다시 시도 / 직접 입력해서 게시 / 버리기.
 7. e4b가 쓴 설명은 PC가 켜져 있고 대기열이 비어 있을 때 PC 도우미가 30분마다 12B로 다시 써서 바꾼다. Claude나 12B가 쓴 글은 다시 쓰지 않는다. 사람이 고친 칸과 방은 AI가 절대 바꾸지 않는다.
@@ -126,13 +126,13 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 
 `ai`는 AI가 쓴 칸을 기록한다. 사이트에는 표시하지 않는다.
 
-- AI가 게시하면 `{"model": "gemma4:e4b-it-qat", "fields": ["title","alt"], "confidence": 0.61}`. 확신도를 못 구하면 `confidence`가 없다.
+- AI가 게시하면 `{"model": "gemma4:e4b-it-qat", "fields": ["title","alt","title_en","alt_en"], "confidence": 0.61}`. AI는 한국어와 영어 제목·alt를 함께 쓰므로 `fields`에 영어 칸(`title_en`, `alt_en`)도 들어간다. 영어를 쓰기 전에 게시된 사진은 `["title","alt"]`처럼 한국어 칸만 있을 수 있다. 확신도를 못 구하면 `confidence`가 없다.
 - `model`은 실제로 답한 모델이다. Claude는 보통 `claude-opus-5-5`이고, 거절에 대비한 대체 모델이 답했으면 그 이름이 남는다.
 - `confidence`(방 배정 확신도): Ollama는 답에서 방 이름의 확률로 계산하고, Claude는 Claude가 스스로 매긴 값(0~1로 자름)을 쓴다. 어느 쪽이든 0.8 미만이면 "확인 필요" 배지가 붙는다.
 - 관리 페이지에서 사람이 저장하면 바뀐 칸은 `fields`에서 빠지고 `confidence`는 지운다 (사람이 봤으니). `fields`가 비면 `ai` 전체를 지운다.
-- 다듬기 대상: `ai.fields`가 비어 있지 않고 `ai.model`이 e4b(`gemma4:e4b-it-qat`, `curator.UPGRADE_FROM`)인 사진. Claude나 12B가 쓴 글은 다듬지 않는다. 다듬기는 `ai.fields`에 남은 칸만 바꾸고, 방과 확신도는 그대로 둔다.
-- "AI로 다시 쓰기"(`redraft`)는 AI가 맡아서 처리를 시작한 때와 글자가 같은 칸만 바꾼다 (그 사이 사람이 고친 칸은 그대로). 바꾼 칸이 `ai.fields`가 되고 `ai.model`은 쓴 모델, 방과 확신도는 그대로.
-- `photos.json`에서 AI가 쓴 제목이나 설명을 직접 고쳤다면 그 칸을 `ai.fields`에서도 빼야 한다 (비면 `ai`를 통째로 지운다). 그대로 두면 PC 도우미의 12B 다듬기가 고친 글을 덮어쓸 수 있다. 관리 페이지에서 저장하면 이건 저절로 된다.
+- 다듬기 대상: `ai.fields`가 비어 있지 않고 `ai.model`이 e4b(`gemma4:e4b-it-qat`, `curator.UPGRADE_FROM`)인 사진. Claude나 12B가 쓴 글은 다듬지 않는다. 다듬기는 `ai.fields`에 남은 칸만 바꾸고(영어 칸이 남아 있으면 영어도 다시 쓰고, `fields`에 없는 영어를 새로 채우지는 않는다), 방과 확신도는 그대로 둔다.
+- "AI로 다시 쓰기"(`redraft`)는 AI가 맡아서 처리를 시작한 때와 글자가 같은 칸만 바꾼다 (그 사이 사람이 고친 칸은 그대로). 바꾼 칸이 `ai.fields`가 되고 `ai.model`은 쓴 모델, 방과 확신도는 그대로. 영어 칸이 없던 사진은 없던 그대로라 같은 칸으로 보아서, 다시 쓰기로 영어가 채워진다.
+- `photos.json`에서 AI가 쓴 제목이나 설명(영어 `title_en`·`alt_en` 포함)을 직접 고쳤다면 그 칸을 `ai.fields`에서도 빼야 한다 (비면 `ai`를 통째로 지운다). 그대로 두면 PC 도우미의 12B 다듬기가 고친 글을 덮어쓸 수 있다. 관리 페이지에서 저장하면 이건 저절로 된다.
 
 ## 관리 페이지 로그인 준비
 
@@ -205,7 +205,7 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 - 저장소가 공개라서 올린 파일은 누구나 볼 수 있다. 대기 중인 사진은 `queue/`에서 몇 분간 공개 상태로 머물고, 버리거나 전시에서 빼도 git 기록에는 남는다. 원본(`originals/`)은 `.gitignore`로 제외되어 있다.
 - `index.html`과 `en/index.html`은 Actions가 만든다. 커밋하지 않는다 (`.gitignore`는 루트의 `/index.html`과 `/en/`만 막는다).
 - 장소 이름은 확인된 것만 쓴다. 사진만 보고 추측한 장소를 제목이나 설명에 넣지 않는다 (AI 프롬프트에도 쓰지 말라고 넣어 두었다. 잘못 들어가면 전시 중 탭에서 고친다).
-- `alt`는 화면 낭독기용 설명이다. 무엇이 찍혔는지 한 문장으로, 흑백이면 끝에 "흑백 사진"을 덧붙인다.
+- `alt`는 화면 낭독기용 설명이다. 무엇이 찍혔는지 한 문장으로, 흑백이면 끝에 "흑백 사진"을 덧붙인다. 영어 `alt_en`은 같은 규칙으로 끝에 ", black-and-white photo"를 덧붙인다.
 - 문구는 한국어, 짧고 평이하게.
 - 사람이 고친 제목·설명과 방 배정은 AI가 다시 바꾸지 않는다.
 - 사이트와 관리 페이지는 외부 스크립트를 불러오지 않는다. 이 계정의 다른 Pages 사이트에도 믿을 수 없는 내용이나 스크립트를 두지 않는다. 같은 출처라서 거기서 도는 스크립트가 관리 페이지 로그인을 몰래 끝낼 수 있다 (알아둘 것). 이걸 바꿔야 한다면 먼저 관리 페이지를 관리 페이지만 쓰는 출처로 옮긴다.
@@ -290,12 +290,12 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 - 이 PC는 로컬 루프백 연결의 일부를 끊는다 (WinError 10054). 그래서 `github_api.py`와 `curator.py`는 끊긴 요청을 다시 보내고, 브라우저 점검은 `serve.py`를 쓴다.
 - Ollama 0.35.1이 같은 증상을 보인다: 요청의 일부가 `wsarecv: An existing connection was forcibly closed` 500으로 실패하고 바로 다시 보내면 성공한다. 그래서 `curator.py`는 최대 3번 시도한다 (연결 거부와 모델 없음은 바로 포기). `draft.yml`도 같은 0.35.1로 고정했고, 내려받은 파일은 그 릴리스의 `sha256sum.txt` 값으로 확인한다. 버전을 올릴 때 이 값도 같이 바꾼다.
 - `draft.yml`에서 쓰기 권한이 있는 `GITHUB_TOKEN`은 worker 단계(`--check`, `--run`)에만, `ANTHROPIC_API_KEY`는 Claude 단계에만 준다. 내려받은 Ollama가 도는 단계에 토큰이나 키를 넣지 말 것. 키와 Claude API의 답 원문은 기록이나 `item.json`에 남기지 않는다.
-- Anthropic에는 썸네일(긴 변 1000px, 메타데이터를 지운 사본)과 지시문(방 목록, 기존 사진의 제목·alt 예시)만 보낸다. 큰 사본이나 원본은 보내지 않는다.
+- Anthropic에는 썸네일(긴 변 1000px, 메타데이터를 지운 사본)과 지시문(방 목록, 기존 사진의 제목·alt 예시. 영어가 있으면 영어도)만 보낸다. 큰 사본이나 원본은 보내지 않는다.
 - Claude 비용은 사진 한 장(또는 다시 쓰기 한 번)에 약 $0.02다 (Opus 5.5, effort low). Max 요금제의 API 크레딧에서 나간다. 키가 없으면 Claude 단계는 건너뛰고 e4b로만 돈다.
 - Claude SDK(`anthropic`)는 `draft.yml`의 `Claude SDK 설치` 단계가 `requirements-ai.txt`로 설치한다. 이 단계가 실패해도 실행은 이어지고, Claude 단계가 사진을 모두 e4b로 넘긴다 (`anthropic 패키지가 없어요`).
 - `requirements-ai.txt`는 의존 패키지까지 버전과 sha256 해시로 고정돼 있고 `pip install --require-hashes`로 설치한다. 새 버전으로 올릴 때는 파일 맨 위 주석대로 저장소 밖 빈 폴더에서 `pip download`를 다시 하고, 받은 이름==버전마다 PyPI의 해시를 모두 다시 적는다.
 - API로 만드는 커밋(worker, PC 도우미, 관리 페이지)은 작성자를 `HPotty36 <112685098+HPotty36@users.noreply.github.com>`로 적는다 (`github_api.AUTHOR`, `admin/config.js`의 `COMMIT_AUTHOR`). 계정 프로필의 이름·이메일이 공개 기록에 들어가지 않게 하려는 것이니 지우지 말 것.
-- AI 제목은 40자, 설명은 200자에서 자른다 (낱말 경계에서). 흑백 표시는 자른 뒤에 붙는다.
+- AI 제목은 40자, 설명은 200자, 영어 제목은 60자, 영어 설명은 250자에서 자른다 (낱말 경계에서). 흑백 표시(", 흑백 사진", ", black-and-white photo")는 자른 뒤에 붙는다. 제목·alt·영어 제목·영어 alt 네 칸 중 하나라도 비어 있는 답은 쓸 수 없다 (Ollama는 다시 요청하고, Claude는 읽을 수 없는 답으로 보고 다음 단계로 넘긴다).
 - 모델: Actions는 Claude `claude-opus-5-5` (환경변수 `NOCTURNE_CLAUDE_MODEL`), 못 쓴 사진만 `gemma4:e4b-it-qat` (`NOCTURNE_MODEL`). PC는 `gemma4:12b-it-qat` (기본). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.
 - README 그림(`.github/assets/`)은 자동으로 다시 만들지 않는다. 디자인이 바뀌면 손으로 다시 찍는다. 화면 그림은 공개 사이트를 headless Chrome(DevTools 프로토콜)으로 찍었다: 1440×900, 폰 390×844 2배, `prefers-color-scheme` 어둡게·밝게, JPEG 품질 82. 워드마크(Cormorant Garamond 이탤릭, 배경 투명)와 소셜 미리보기(1280×640, `photos/thumb/`의 사진 다섯 장)는 저장소 밖의 작은 HTML을 같은 방법으로 찍었다. 관리 페이지는 찍지 않는다. `social-preview.jpg`는 저장소 **Settings** → **Social preview**에 손으로 올린다.
 - 관리 페이지의 토큰은 로그인으로 받는 8시간짜리 `ghu_…` 토큰이고, 열린 페이지의 메모리에만 있다. localStorage·sessionStorage·쿠키·주소·기록 어디에도 쓰지 않는다. 브라우저에 남는 것은 localStorage `nocturne.signedIn`("이 기기에서 로그인한 적 있음", 비밀 아님)과, 로그인하러 다녀오는 동안의 sessionStorage `nocturne.login`(위조 방지 값과 PKCE 원문, 돌아오자마자 지움)·`nocturne.auto`(이 탭에서 저절로 로그인을 이미 해 봄)뿐이다. 옛 방식의 `nocturne.token`은 페이지를 열 때 지운다.
