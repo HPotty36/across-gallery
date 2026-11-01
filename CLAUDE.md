@@ -187,7 +187,7 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Claude API를 부른다. 비용은 Max 요금제에 딸린 API 크레딧에서 나간다. 키가 없으면 Claude 단계는 건너뛰고 e4b로만 돈다.
 
 1. **크레딧 연결**: claude.ai → **Settings** → **Billing** → **API credits**에서 Console 조직을 연결한다 (Max 요금제).
-2. **API 키 만들기**: Claude Console(`platform.claude.com`)의 API 키 화면에서 새 키를 만든다. 이름은 알아보기 쉽게 (예: `nocturne-draft`). 보이는 키를 복사한다 (다시 볼 수 없다).
+2. **API 키 만들기**: Claude Console(`platform.claude.com`) → **API keys** → **Create key**. 이름은 알아보기 쉽게 (예: `nocturne-draft`). **Linked account**는 나(개인 키, `sk-ant-usr…`로 시작), 워크스페이스는 **Default Workspace** 하나로 묶고, 만료는 **Never**(또는 1년). 워크스페이스에 묶지 않은 키는 요청마다 워크스페이스 ID가 필요해 `Claude API 오류 400`이 나고, 만료일은 만든 뒤에 바꿀 수 없다. 보이는 키를 복사한다 (다시 볼 수 없다). Claude Code 로그인 토큰(`sk-ant-oat01-…`)은 API 키가 아니라서 넣으면 `Claude API 키가 맞지 않아요`가 난다.
 3. **GitHub에 넣기**: 저장소 **Settings** → **Secrets and variables** → **Actions** → **New repository secret**. Name은 `ANTHROPIC_API_KEY`, Secret에 키를 붙여 넣고 **Add secret**.
 4. **한도 걸기**: Console에서 월 사용 한도를 건다. 크레딧보다 많이 쓰지 않게 한다.
 5. **확인**: 사진 한 장을 올리고 Actions의 Draft 실행에서 `Claude로 초안 쓰고 게시` 단계에 `published: <name>`이 찍히는지 본다. 그 사진의 `ai.model`은 `claude-opus-5-5`다.
@@ -243,11 +243,11 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 
 - **Actions 기록**: https://github.com/HPotty36/nocturne/actions 에서 `Draft`(GitHub의 AI: Claude, e4b)와 `Site`(사이트 빌드)의 실행마다 단계별 기록을 본다. 관리 페이지 위쪽의 "반영 실패"도 여기로 이어진다. Draft를 잠시 끄려면 Actions 탭 왼쪽에서 `Draft` → 오른쪽 위 `…` → **Disable workflow** (명령줄은 `gh workflow disable draft.yml`, 다시 켜기는 `gh workflow enable draft.yml`). 꺼 둔 동안에는 PC 도우미가 올린 지 5분 지난 사진을 맡고, PC도 꺼져 있으면 사진은 대기열에 남는다.
 - **Claude가 못 쓸 때**: Draft 실행 화면에 `Claude` 경고가 `<name>: <이유>`로 뜬다 (같은 이유가 넘김 커밋의 `item.json` `error`에도 남는다). 그 사진은 같은 실행의 e4b가 이어 쓴다 (e4b도 실패하면 새 사진 탭에 남는다). 이유별로 할 일:
-  - `Claude API 키가 맞지 않아요`: 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기).
+  - `Claude API 키가 맞지 않아요`: 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기). Claude Code 로그인 토큰(`sk-ant-oat01-…`)을 넣었거나, 키가 만료·삭제된 경우다.
   - `Claude API 권한이나 크레딧을 확인해 주세요`: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지, claude.ai의 크레딧 연결이 풀리지 않았는지 본다.
   - `Claude API 요청이 너무 많아요`: 잠시 뒤 저절로 풀린다. 계속되면 Console의 한도를 본다.
   - `Claude API 오류 <상태>`, `Claude API에 연결하지 못했어요`, `Claude의 답이 끊겼어요`, `Claude의 답을 읽을 수 없어요 (…)`: 대개 잠깐 문제다. 계속되면 Claude 단계 기록을 본다. `Claude API 오류` 뒤의 괄호에는 알려진 오류 종류(`api_error` 등)와 요청 ID(`req_…`)가 있으면 붙는다.
-  - `Claude API 오류 400`이나 `404`가 계속되면: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지 보고, `draft.yml`의 `NOCTURNE_CLAUDE_MODEL`이 맞는 모델 이름인지 본다.
+  - `Claude API 오류 400`이나 `404`가 계속되면: 키를 워크스페이스에 묶어 만들었는지(Claude API 키 넣기 2번), Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지 보고, `draft.yml`의 `NOCTURNE_CLAUDE_MODEL`이 맞는 모델 이름인지 본다.
   - `Claude가 이 사진의 초안을 거절했어요`: e4b가 대신 썼으니 전시 중 탭에서 그 사진의 방·제목·설명을 확인한다.
   - `anthropic 패키지가 없어요`: `Claude SDK 설치` 단계가 실패했다. 그 단계 기록을 본다.
   - `AI 처리 중 문제가 생겼어요`: Claude 단계의 예상 못 한 오류다. 그 단계 기록의 traceback을 본다.
