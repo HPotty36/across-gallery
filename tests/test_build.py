@@ -178,6 +178,9 @@ class PwaTests(unittest.TestCase):
     def version(self):
         return re.search(r"const VERSION = '([0-9a-f]{12})';", self.built("sw.js")).group(1)
 
+    def cover(self):
+        return json.loads(re.search(r'const COVER = (".*?");', self.built("sw.js")).group(1))
+
     def test_manifest(self):
         manifest = json.loads(self.built("manifest.webmanifest"))
         self.assertEqual(manifest, {
@@ -207,10 +210,20 @@ class PwaTests(unittest.TestCase):
         photolib.save_data(self.root, data)
         self.assertNotEqual(self.version(), second)
 
+    def test_sw_cover(self):
+        self.assertEqual(self.cover(), build.asset_url(self.root, "full", "a1"))  # the full-size print, not the thumbnail
+        for value in (None, "gone"):  # no cover, and a cover that is not hung
+            data = photolib.load_data(self.root)
+            if value is None: data.pop("cover", None)
+            else: data["cover"] = value
+            photolib.save_data(self.root, data)
+            self.assertEqual(self.cover(), "")
+
     def test_sw_template_marks(self):
         sw = self.root / "src" / "sw.js"
         text = sw.read_text(encoding="utf-8")
-        for broken in (text.replace("'__VERSION__'", "'x'"), text + "\nconst MORE = [/*__PHOTOS__*/];\n"):
+        for broken in (text.replace("'__VERSION__'", "'x'"), text + "\nconst MORE = [/*__PHOTOS__*/];\n",
+                       text.replace("'' /*__COVER__*/", "''"), text + "\nconst MORE = '' /*__COVER__*/;\n"):
             sw.write_text(broken, encoding="utf-8")
             with self.assertRaisesRegex(build.BuildError, "src/sw.js"):
                 build.build(self.root)
