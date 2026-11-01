@@ -6,8 +6,8 @@
   "date": "2026.09.16",
   "camera": "Nothing Phone (2a) · f/1.87 · 1/176s · ISO 100",
   "grayscale": false,
-  "status": "waiting",
-  "claimed_at": null,
-  "by": null,
-  "error": "Claude API 키가 맞지 않아요"
+  "status": "github",
+  "claimed_at": "2026-11-01T12:41:06Z",
+  "by": "github",
+  "error": null
 }
