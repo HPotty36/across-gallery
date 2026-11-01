@@ -1,12 +1,17 @@
+import base64
+import builtins
 import http.client
 import io
 import json
 import math
+import os
 import shutil
+import sys
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import helpers  # puts scripts/ on sys.path
@@ -266,6 +271,236 @@ class TransportTests(unittest.TestCase):
         with mock.patch.object(curator.urllib.request, "urlopen", flaky_urlopen):
             r = curator.draft(img, helpers.SITE, False, model="m")
         self.assertEqual((r["room"], r["title"], len(calls)), ("night", "공중전화", 3))
+
+
+class PromptReplyTests(unittest.TestCase):
+    def test_reply_line_is_swappable(self):
+        ollama = curator.build_prompt(helpers.SITE)
+        claude = curator.build_prompt(helpers.SITE, curator.CLAUDE_REPLY)
+        self.assertTrue(ollama.endswith(curator.PROMPT_REPLY))
+        self.assertTrue(claude.endswith(curator.CLAUDE_REPLY))
+        self.assertEqual(ollama.removesuffix(curator.PROMPT_REPLY), claude.removesuffix(curator.CLAUDE_REPLY))
+        self.assertIn("장소의 이름을 쓰지 마세요", claude)
+        self.assertIn("confidence", claude)
+        self.assertNotIn("JSON으로만 답하세요", claude)
+
+
+class APIStatusError(Exception):
+    """Same shape as anthropic.APIStatusError: an int status_code. The conversion is duck-typed, so no SDK is needed."""
+
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class APIConnectionError(Exception):
+    """Same name as anthropic.APIConnectionError: no status_code."""
+
+
+class APITimeoutError(APIConnectionError):
+    """Same as anthropic.APITimeoutError, a subclass of APIConnectionError."""
+
+
+class FakeClient:
+    """Stands in for anthropic.Anthropic: beta.messages.create records its keyword arguments."""
+
+    def __init__(self, response=None, error=None):
+        self.calls = []
+        self.response, self.error = response, error
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def claude_response(reply=None, *, text=None, stop_reason="end_turn", model="claude-opus-5-5", blocks=None):
+    """What client.beta.messages.create returns: a text block holding the JSON reply."""
+    if text is None:
+        text = json.dumps(reply, ensure_ascii=False)
+    content = blocks if blocks is not None else [SimpleNamespace(type="text", text=text)]
+    return SimpleNamespace(stop_reason=stop_reason, model=model, content=content)
+
+
+GOOD_REPLY = {"room": "night", "title": "공중전화", "alt": "빨간 공중전화 부스", "confidence": 0.9}
+
+
+class ClaudeDraftTests(unittest.TestCase):
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.img = helpers.make_jpeg(tmp / "t.jpg")
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("NOCTURNE_CLAUDE_MODEL", None)
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    def draft(self, response=None, error=None, grayscale=False, **kwargs):
+        client = FakeClient(response if response is not None else claude_response(GOOD_REPLY), error)
+        return curator.claude_draft(self.img, helpers.SITE, grayscale, client=client, **kwargs), client
+
+    def failure(self, **kwargs):
+        with self.assertRaises(curator.CuratorError) as cm:
+            self.draft(**kwargs)
+        return str(cm.exception)
+
+    def test_constants(self):
+        self.assertEqual(curator.CLAUDE_MODEL, "claude-opus-5-5")
+        self.assertEqual(curator.UPGRADE_FROM, ("gemma4:e4b-it-qat",))
+        self.assertEqual(curator.claude_model_name(), "claude-opus-5-5")
+
+    def test_request(self):
+        got, client = self.draft()
+        self.assertEqual(len(client.calls), 1)
+        kw = client.calls[0]
+        self.assertEqual((kw["model"], kw["max_tokens"]), ("claude-opus-5-5", 16000))
+        self.assertEqual(kw["betas"], ["server-side-fallback-2026-07-01"])
+        self.assertEqual(kw["fallbacks"], "default")
+        self.assertEqual(kw["output_config"]["effort"], "low")
+        self.assertEqual(kw["output_config"]["format"]["type"], "json_schema")
+        schema = kw["output_config"]["format"]["schema"]
+        self.assertEqual(schema["properties"]["room"]["enum"], [room["id"] for room in helpers.SITE["rooms"]])
+        self.assertEqual(schema["required"], ["room", "title", "alt", "confidence"])
+        self.assertIs(schema["additionalProperties"], False)
+        self.assertNotIn("thinking", kw)  # Opus 5.5 always thinks and rejects the parameter
+        self.assertNotIn("temperature", kw)
+        (message,) = kw["messages"]
+        self.assertEqual(message["role"], "user")
+        image, text = message["content"]
+        self.assertEqual(image, {"type": "image", "source": {
+            "type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(self.img.read_bytes()).decode("ascii")}})
+        self.assertEqual(text["type"], "text")
+        self.assertIn("장소의 이름을 쓰지 마세요", text["text"])
+        self.assertIn("confidence", text["text"])
+        self.assertNotIn("JSON으로만 답하세요", text["text"])
+        self.assertEqual(got["model"], "claude-opus-5-5")
+
+    def test_model_from_environment(self):
+        os.environ["NOCTURNE_CLAUDE_MODEL"] = "claude-sonnet-5-5"
+        self.assertEqual(curator.claude_model_name(), "claude-sonnet-5-5")
+        _, client = self.draft(claude_response(GOOD_REPLY, model="claude-sonnet-5-5"))
+        self.assertEqual(client.calls[0]["model"], "claude-sonnet-5-5")
+        os.environ["NOCTURNE_CLAUDE_MODEL"] = ""  # a workflow variable that is not set arrives empty
+        self.assertEqual(curator.claude_model_name(), "claude-opus-5-5")
+
+    def test_model_argument_wins(self):
+        _, client = self.draft(model="claude-haiku-5")
+        self.assertEqual(client.calls[0]["model"], "claude-haiku-5")
+
+    def test_reply_is_tidied(self):
+        title = "  공중전화 부스가 있는 비 내린 밤거리의 아주 긴 제목이 계속 이어집니다 그리고 더 이어집니다 "
+        reply = {"room": "night", "title": title, "alt": "빨간 공중전화 부스입니다.", "confidence": 0.65}
+        got, _ = self.draft(claude_response(reply), grayscale=True)
+        self.assertGreater(len(title.strip()), 40)
+        self.assertEqual(got["title"], curator.clamp(title.strip(), 40))
+        self.assertLessEqual(len(got["title"]), 40)
+        self.assertEqual(got, {"room": "night", "title": got["title"], "alt": "빨간 공중전화 부스, 흑백 사진",
+                               "confidence": 0.65, "model": "claude-opus-5-5"})
+
+    def test_fallback_model_is_recorded(self):
+        got, _ = self.draft(claude_response(GOOD_REPLY, model="claude-opus-4-8"))
+        self.assertEqual(got["model"], "claude-opus-4-8")
+
+    def test_thinking_block_before_the_text_is_skipped(self):
+        blocks = [SimpleNamespace(type="thinking", thinking="…"),
+                  SimpleNamespace(type="text", text=json.dumps(GOOD_REPLY, ensure_ascii=False))]
+        got, _ = self.draft(claude_response(blocks=blocks))
+        self.assertEqual(got["room"], "night")
+
+    def test_confidence_edges(self):
+        for value, want in ((1.7, 1.0), (-0.2, 0.0), ("0.9", None), (True, None), (None, None), (0.9, 0.9),
+                            (float("nan"), None), (float("inf"), 1.0)):
+            with self.subTest(value=value):
+                got, _ = self.draft(claude_response(dict(GOOD_REPLY, confidence=value)))
+                self.assertEqual(got["confidence"], want)
+                self.assertEqual(got["confidence"] is None, want is None)
+
+    def test_missing_confidence_is_none(self):
+        got, _ = self.draft(claude_response({k: v for k, v in GOOD_REPLY.items() if k != "confidence"}))
+        self.assertIsNone(got["confidence"])
+
+    def test_whole_confidence_is_int(self):
+        # photos.json is written by Python and by JavaScript; 1.0 would print differently, so 1 is an int.
+        for value in (1, 1.0, 1.7, 0, -0.2):
+            with self.subTest(value=value):
+                got, _ = self.draft(claude_response(dict(GOOD_REPLY, confidence=value)))
+                self.assertIs(type(got["confidence"]), int)
+
+    def test_failures(self):
+        cases = [
+            (dict(response=claude_response(GOOD_REPLY, stop_reason="refusal")), "Claude가 이 사진의 초안을 거절했어요"),
+            (dict(response=claude_response(blocks=[], stop_reason="refusal")), "Claude가 이 사진의 초안을 거절했어요"),
+            (dict(response=claude_response(GOOD_REPLY, stop_reason="max_tokens")), "Claude의 답이 끊겼어요"),
+            (dict(error=APIStatusError(401)), "Claude API 키가 맞지 않아요"),
+            (dict(error=APIStatusError(402)), "Claude API 권한이나 크레딧을 확인해 주세요"),
+            (dict(error=APIStatusError(403)), "Claude API 권한이나 크레딧을 확인해 주세요"),
+            (dict(error=APIStatusError(429)), "Claude API 요청이 너무 많아요"),
+            (dict(error=APIStatusError(500)), "Claude API 오류 500"),
+            (dict(error=APIStatusError(529)), "Claude API 오류 529"),
+            (dict(error=APIConnectionError()), "Claude API에 연결하지 못했어요"),
+            (dict(error=APITimeoutError()), "Claude API에 연결하지 못했어요"),
+        ]
+        for kwargs, message in cases:
+            with self.subTest(message=message, **{k: type(v).__name__ for k, v in kwargs.items()}):
+                self.assertEqual(self.failure(**kwargs), message)
+
+    def test_unreadable_replies(self):
+        unreadable = [
+            claude_response(text="not json"),
+            claude_response(dict(GOOD_REPLY, room="nowhere")),
+            claude_response(dict(GOOD_REPLY, title="")),
+            claude_response(dict(GOOD_REPLY, title="   ")),
+            claude_response(dict(GOOD_REPLY, alt="")),
+            claude_response(blocks=[]),
+            claude_response(blocks=[SimpleNamespace(type="thinking", thinking="…")]),
+        ]
+        for n, response in enumerate(unreadable):
+            with self.subTest(n=n):
+                self.assertTrue(self.failure(response=response).startswith("Claude의 답을 읽을 수 없어요 ("))
+
+    def test_the_reply_text_is_not_put_in_the_error(self):
+        self.assertNotIn("not json", self.failure(response=claude_response(text="not json")))
+
+    def test_other_errors_are_not_converted(self):
+        with self.assertRaises(TypeError):
+            self.draft(error=TypeError("bad argument"))
+
+    def test_no_key_does_not_import_the_sdk(self):
+        real_import, imported = builtins.__import__, []
+
+        def spy(name, *args, **kwargs):
+            if name.split(".")[0] == "anthropic":
+                imported.append(name)
+            return real_import(name, *args, **kwargs)
+        with mock.patch.object(builtins, "__import__", spy), self.assertRaises(curator.CuratorError) as cm:
+            curator.claude_draft(self.img, helpers.SITE, False)
+        self.assertEqual(str(cm.exception), "Claude API 키가 없어요")
+        self.assertFalse(cm.exception.retry)
+        self.assertEqual(imported, [])
+        os.environ["ANTHROPIC_API_KEY"] = ""  # an empty secret is no key
+        with self.assertRaises(curator.CuratorError) as cm:
+            curator.claude_draft(self.img, helpers.SITE, False)
+        self.assertEqual(str(cm.exception), "Claude API 키가 없어요")
+
+    def test_no_package(self):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-test"
+        with mock.patch.dict(sys.modules, {"anthropic": None}), self.assertRaises(curator.CuratorError) as cm:
+            curator.claude_draft(self.img, helpers.SITE, False)
+        self.assertEqual(str(cm.exception), "anthropic 패키지가 없어요")
+        self.assertFalse(cm.exception.retry)
+
+    def test_production_client(self):
+        """Without a client it builds anthropic.Anthropic(timeout=120, max_retries=2); the key stays in the environment."""
+        os.environ["ANTHROPIC_API_KEY"] = "sk-test"
+        built = []
+        fake_module = SimpleNamespace(Anthropic=lambda **kw: built.append(kw) or FakeClient(claude_response(GOOD_REPLY)))
+        with mock.patch.dict(sys.modules, {"anthropic": fake_module}):
+            got = curator.claude_draft(self.img, helpers.SITE, False)
+        self.assertEqual(built, [{"timeout": 120, "max_retries": 2}])
+        self.assertEqual(got["room"], "night")
 
 
 class FakeAITests(unittest.TestCase):

@@ -1,6 +1,9 @@
-"""Curator: a local vision model (Ollama) drafts the room, title and alt text of a photo.
+"""Curator: an AI drafts the room, title and alt text of a photo.
 
-Standard library only. Callers pass `post`/`get` in tests; by default they talk to Ollama over HTTP.
+Two drafters with the same call shape and result: `draft` asks a local vision model (Ollama), `claude_draft` asks
+the Claude API. Standard library only, except that `claude_draft` imports the `anthropic` SDK (requirements-ai.txt)
+when it is not given a client, so the site build and the tests need no SDK. Callers pass `post`/`get`/`client` in
+tests; by default they talk to Ollama over HTTP and to the Claude API through the SDK.
 """
 import base64
 import http.client
@@ -14,6 +17,12 @@ from pathlib import Path
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "gemma4:12b-it-qat"
+UPGRADE_FROM = ("gemma4:e4b-it-qat",)  # drafts by these models are rewritten later by a better one
+CLAUDE_MODEL = "claude-opus-5-5"
+CLAUDE_BETA = "server-side-fallback-2026-07-01"  # with fallbacks="default": another model answers if one refuses
+CLAUDE_MAX_TOKENS = 16000  # room for the thinking Opus 5.5 always does; the reply itself is tiny
+CLAUDE_TIMEOUT = 120  # seconds for one request
+CLAUDE_RETRIES = 2  # the SDK retries 429, 5xx and dropped connections itself; a failure after that is the caller's
 TIMEOUT = 300  # seconds for one generate call
 CONFIDENT = 0.8  # room confidence at or above this is trusted without a second look
 ATTEMPTS = 3  # this PC's Ollama sometimes drops a request right after generating; a retry works
@@ -21,6 +30,14 @@ TITLE_MAX = 40  # characters; the prompt asks for 2 to 8, this only stops a ramb
 ALT_MAX = 200  # characters, before ", 흑백 사진" is added
 
 OFF_MESSAGE = "Ollama가 꺼져 있어요. Ollama를 켠 뒤 다시 시도하거나 직접 입력하세요."
+CLAUDE_NO_KEY = "Claude API 키가 없어요"
+CLAUDE_NO_PACKAGE = "anthropic 패키지가 없어요"
+CLAUDE_BAD_KEY = "Claude API 키가 맞지 않아요"
+CLAUDE_NO_ACCESS = "Claude API 권한이나 크레딧을 확인해 주세요"
+CLAUDE_BUSY = "Claude API 요청이 너무 많아요"
+CLAUDE_OFFLINE = "Claude API에 연결하지 못했어요"
+CLAUDE_REFUSED = "Claude가 이 사진의 초안을 거절했어요"
+CLAUDE_CUT_OFF = "Claude의 답이 끊겼어요"
 
 PROMPT_HEAD = "당신은 사진 전시 사이트의 큐레이터입니다. 이 사진을 아래 방 중 하나에 걸고, 한국어 제목과 대체 텍스트(alt)를 쓰세요."
 PROMPT_RULES = """규칙:
@@ -28,9 +45,9 @@ PROMPT_RULES = """규칙:
 - alt는 화면 낭독기용으로, 무엇이 찍혔는지 한 문장. "입니다"나 마침표로 끝내지 마세요.
 - 방 설명 문구를 그대로 옮기지 말고, 이 사진에 보이는 것을 쓰세요.
 - 도시, 건물, 경기장, 다리 같은 장소의 이름을 쓰지 마세요. 사진만 보고 장소를 짐작하지 마세요.
-- 흑백인지 컬러인지는 쓰지 마세요.
-
-JSON으로만 답하세요: {"room": "<방 id>", "title": "...", "alt": "..."}"""
+- 흑백인지 컬러인지는 쓰지 마세요."""
+PROMPT_REPLY = 'JSON으로만 답하세요: {"room": "<방 id>", "title": "...", "alt": "..."}'
+CLAUDE_REPLY = "confidence에는 고른 방이 맞다고 얼마나 확신하는지 0에서 1 사이의 숫자를 쓰세요."
 
 
 class CuratorError(Exception):
@@ -45,15 +62,20 @@ def model_name():
     return os.environ.get("NOCTURNE_MODEL", DEFAULT_MODEL)
 
 
+def claude_model_name():
+    return os.environ.get("NOCTURNE_CLAUDE_MODEL") or CLAUDE_MODEL  # empty counts as unset: a workflow passes "" for no value
+
+
 # --- prompt and reply ------------------------------------------------------------------------
 
-def build_prompt(data):
+def build_prompt(data, reply=PROMPT_REPLY):
+    """The instructions for a model; `reply` is the last line, which says how to answer (Ollama and Claude differ)."""
     rooms = data["rooms"]
     examples = [f"- [{room['name']}] {p['title']} / {p['alt']}" for room in rooms for p in room["photos"][:2]]
     parts = [PROMPT_HEAD, "방:\n" + "\n".join(f"- {r['id']} ({r['name']}): {r['note']}" for r in rooms)]
     if examples:
         parts.append("기존 사진의 제목과 alt 예시 (말투를 맞추세요):\n" + "\n".join(examples))
-    parts.append(PROMPT_RULES)
+    parts += [PROMPT_RULES, reply]
     return "\n\n".join(parts)
 
 
@@ -70,9 +92,8 @@ def clamp(text, limit):
     return cut.rstrip(" \n,")
 
 
-def parse_reply(text, room_ids):
-    """{"room", "title", "alt", "known"} from the model's JSON; an unknown room falls back to the first one.
-    The title is cut to TITLE_MAX characters and the alt to ALT_MAX (see clamp)."""
+def _load_reply(text):
+    """The JSON object in the model's reply (it may sit inside a code fence), or ValueError."""
     found = re.search(r"\{.*\}", text or "", re.S)
     try:
         reply = json.loads(found.group(0)) if found else None
@@ -80,6 +101,13 @@ def parse_reply(text, room_ids):
         reply = None
     if not isinstance(reply, dict):
         raise ValueError(f"JSON이 아니에요: {(text or '')[:80]!r}")
+    return reply
+
+
+def parse_reply(text, room_ids):
+    """{"room", "title", "alt", "known"} from the model's JSON; an unknown room falls back to the first one.
+    The title is cut to TITLE_MAX characters and the alt to ALT_MAX (see clamp)."""
+    reply = _load_reply(text)
     fields = {}
     for key in ("title", "alt"):
         value = reply.get(key)
@@ -211,3 +239,96 @@ def draft(image, data, grayscale, *, post=None, model=None):
             return {"room": parsed["room"], "title": parsed["title"], "alt": finish_alt(parsed["alt"], grayscale),
                     "confidence": confidence, "model": model}
     raise CuratorError(f"AI가 답을 주지 못했어요: {cause}")
+
+
+# --- talking to Claude -------------------------------------------------------------------------
+
+def claude_schema(room_ids):
+    """The JSON Schema the reply must follow: the room is one of the ids, and nothing else is added."""
+    return {"type": "object",
+            "properties": {"room": {"type": "string", "enum": list(room_ids)}, "title": {"type": "string"},
+                           "alt": {"type": "string"}, "confidence": {"type": "number"}},
+            "required": ["room", "title", "alt", "confidence"],
+            "additionalProperties": False}
+
+
+def claude_confidence(value):
+    """The model's own confidence cut into 0 to 1; None when it is not a number. A whole number is an int (see _tidy)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:  # not a number, or NaN
+        return None
+    return _tidy(min(1.0, max(0.0, value)))
+
+
+def _claude_client():
+    """anthropic.Anthropic, which reads ANTHROPIC_API_KEY itself. Without a key the SDK is not even imported."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise CuratorError(CLAUDE_NO_KEY, retry=False)
+    try:
+        import anthropic
+    except ImportError:
+        raise CuratorError(CLAUDE_NO_PACKAGE, retry=False) from None
+    return anthropic.Anthropic(timeout=CLAUDE_TIMEOUT, max_retries=CLAUDE_RETRIES)
+
+
+def _claude_failure(err):
+    """The CuratorError for an SDK exception, or None if `err` is not one. It is matched by shape (an int status_code,
+    or a class named like the SDK's connection errors) so tests need no SDK. The SDK's own text is not passed on."""
+    status = getattr(err, "status_code", None)
+    if isinstance(status, int) and not isinstance(status, bool):
+        if status == 401:
+            return CuratorError(CLAUDE_BAD_KEY, retry=False)
+        if status in (402, 403):
+            return CuratorError(CLAUDE_NO_ACCESS, retry=False)
+        if status == 429:
+            return CuratorError(CLAUDE_BUSY)
+        return CuratorError(f"Claude API 오류 {status}")
+    if any(cls.__name__ in ("APIConnectionError", "APITimeoutError") for cls in type(err).__mro__):
+        return CuratorError(CLAUDE_OFFLINE)
+    return None
+
+
+def _unreadable(reason):
+    return CuratorError(f"Claude의 답을 읽을 수 없어요 ({reason})")
+
+
+def claude_draft(image, data, grayscale, *, model=None, client=None):
+    """Like `draft`, but the Claude API answers: {"room", "title", "alt", "confidence", "model"}. One request (the SDK
+    retries transient failures itself). Every failure is a CuratorError with a short Korean message, never the SDK's
+    text or the reply. `model` in the result is the model that really answered, which may be a fallback."""
+    model = model or claude_model_name()
+    if client is None:
+        client = _claude_client()
+    room_ids = [room["id"] for room in data["rooms"]]
+    picture = base64.b64encode(Path(image).read_bytes()).decode("ascii")
+    try:
+        response = client.beta.messages.create(
+            model=model,
+            max_tokens=CLAUDE_MAX_TOKENS,
+            betas=[CLAUDE_BETA],
+            fallbacks="default",
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": claude_schema(room_ids)}},
+            messages=[{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": picture}},
+                {"type": "text", "text": build_prompt(data, CLAUDE_REPLY)}]}],
+        )
+    except Exception as err:
+        failure = _claude_failure(err)
+        if failure is None:
+            raise
+        raise failure from None
+    if response.stop_reason == "refusal":
+        raise CuratorError(CLAUDE_REFUSED, retry=False)
+    if response.stop_reason == "max_tokens":
+        raise CuratorError(CLAUDE_CUT_OFF)
+    text = next((block.text for block in response.content if block.type == "text"), None)  # thinking blocks may come first
+    if text is None:
+        raise _unreadable("답에 글이 없어요")
+    try:
+        parsed = parse_reply(text, room_ids)
+        reply = _load_reply(text)
+    except ValueError as err:  # parse_reply quotes the start of a reply that is not JSON: keep only the part before ":"
+        raise _unreadable(str(err).partition(":")[0]) from None
+    if not parsed["known"]:
+        raise _unreadable("모르는 방이에요")
+    return {"room": parsed["room"], "title": parsed["title"], "alt": finish_alt(parsed["alt"], grayscale),
+            "confidence": claude_confidence(reply.get("confidence")), "model": getattr(response, "model", None) or model}
