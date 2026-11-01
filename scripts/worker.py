@@ -19,8 +19,8 @@ text by Claude or by the PC model itself, a field a person edited or the room.
     python scripts/worker.py --by github --run [--ai claude] [--only a,b]   processes them all (or only those named)
 Both use GITHUB_TOKEN. --ai ollama (the default) drafts with the model from NOCTURNE_MODEL and records an AI
 failure; --ai claude drafts with the Claude API (model from NOCTURNE_CLAUDE_MODEL, key from ANTHROPIC_API_KEY),
-hands an AI failure off and prints a ::warning line for it, keeps looking until no new upload has landed, and
-without a key takes nothing at all. --only takes just the named items
+hands an AI failure off and prints a ::warning line for it, leaves alone what a Claude pass handed off before, keeps
+looking until no new upload has landed, and without a key takes nothing at all. --only takes just the named items
 that are takeable now (an empty value: none). When GITHUB_OUTPUT is set, --check writes names=<comma-separated names>
 (empty when there is nothing to take) and --run writes published=<count>. --run exits 0 when every item was handled,
 1 when at least one hit an error (photos it published still count).
@@ -72,6 +72,13 @@ def _find(data, file):
         return None
 
 
+def _handed_off_by_claude(item):
+    """Did a Claude pass hand this item off? Its note is then a Claude failure, or CRASHED: only a handoff leaves that on
+    a waiting item (a crash anywhere else records "failed"; every claim and the admin page's 다시 시도 clear error)."""
+    error = item.get("error")
+    return item["status"] == "waiting" and (error == CRASHED or curator.is_claude_failure(error))
+
+
 def _usable(item, now, by):
     """Can a worker judge this item.json at all: an object whose status and times can be read?"""
     if not isinstance(item, dict):
@@ -119,9 +126,17 @@ class Worker:
                     log.warning("대기열: queue/%s/item.json을 읽을 수 없어서 건너뛰어요 (관리 페이지에서 버릴 수 있어요)", name)
                 self._items[name] = (sha, item or None)
             item = self._items[name][1]
-            if item and name not in self.released and queue_items.can_take(item, now, self.by):
+            if item and name not in self.released and self._may_take(item, now):
                 found.append((item["uploaded_at"], name))
         return [name for _, name in sorted(found)]
+
+    def _may_take(self, item, now):
+        """queue_items.can_take, except that the Claude pass (handoff mode) leaves alone an item a Claude pass handed off
+        before: asking Claude again would most likely fail the same way, and cost again. The e4b pass and the PC take it;
+        the admin page's 다시 시도 clears error, so a person's retry reaches Claude again."""
+        if not queue_items.can_take(item, now, self.by):
+            return False
+        return not (self._ai_failure_mode() == "handoff" and _handed_off_by_claude(item))
 
     def _read_item(self, name, now):
         """item.json of a queue folder; None when there is none, False when it cannot be read or judged."""
@@ -148,7 +163,7 @@ class Worker:
         except ValueError:  # not JSON: nothing a worker can take
             return "skipped"
         now = self.now_fn()
-        if found is None or not _usable(found[0], now, self.by) or not queue_items.can_take(found[0], now, self.by):
+        if found is None or not _usable(found[0], now, self.by) or not self._may_take(found[0], now):
             return "skipped"
         claimed = queue_items.claim(found[0], self.by, now)
         if not self._claim(name, claimed, found[1]):

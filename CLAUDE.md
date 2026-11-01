@@ -100,7 +100,7 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 
 대기열 항목 `status`: `waiting` → `pc` 또는 `github`(맡아서 처리 중) → 게시되면 폴더 삭제 / `failed`. GitHub는 `waiting`을 바로, PC는 올린 지 5분 지난 것만 맡는다. 10분 넘게 끝나지 않은 맡김은 죽은 것으로 보고 다시 맡을 수 있다 (관리 페이지에서 버릴 수도 있다). 동시에 맡으려 하면 파일 sha 때문에 늦은 쪽이 물러난다.
 
-- Claude 단계에서 Claude가 못 쓰면(키·크레딧·API 오류, 거절, 맡은 뒤 예상 못 한 오류) `failed`로 두지 않고 `waiting`으로 넘긴다 (커밋 메시지 `대기열: <name> Claude 실패, Ollama로 넘김`, 이유는 `error`와 Actions 기록의 `Claude` 경고에 남는다). 같은 실행의 e4b 단계가 이어 맡는다. 이 메시지에는 `올림`도 `다시 시도`도 없어서 `draft.yml`을 다시 시작하지 않는다.
+- Claude 단계에서 Claude가 못 쓰면(키·크레딧·API 오류, 거절, 맡은 뒤 예상 못 한 오류) `failed`로 두지 않고 `waiting`으로 넘긴다 (커밋 메시지 `대기열: <name> Claude 실패, Ollama로 넘김`, 이유는 `error`와 Actions 기록의 `Claude` 경고에 남는다). 같은 실행의 e4b 단계가 이어 맡는다. 이렇게 넘긴 사진(`error`가 Claude 실패 문구나 `AI 처리 중 문제가 생겼어요`인 `waiting`)은 다음 실행의 Claude 단계도 다시 맡지 않는다 (같은 실패를 되풀이하고 비용만 든다). e4b와 PC는 맡는다. 관리 페이지의 다시 시도는 `error`를 지우므로 그 뒤에는 Claude가 다시 맡는다. 이 메시지에는 `올림`도 `다시 시도`도 없어서 `draft.yml`을 다시 시작하지 않는다.
 - PC의 AI가 못 쓰면(Ollama가 도중에 꺼짐, 모델이 답을 못 줌) `failed`로 두지 않고 `waiting`으로 돌려놓는다 (커밋 메시지 `대기열: <name> 다시 시도 (PC AI 실패)`, 이유는 `error`에 남는다). 그러면 `draft.yml`이 GitHub에서 맡고, PC 도우미는 그 항목을 30분 동안 건드리지 않는다.
 - `failed`가 되는 경우: e4b 단계의 AI가 실패, 대기열 사진 파일이 없거나 읽을 수 없음, 같은 이름의 사진이 이미 있음, e4b 단계나 PC에서 맡은 뒤 예상 못 한 오류(`AI 처리 중 문제가 생겼어요`, 자세한 내용은 Actions 기록이나 `helper.log`; Claude 단계에서는 위처럼 넘긴다). `failed`는 사람이 다시 시도를 눌러야 `waiting`이 된다.
 - GitHub에 닿지 못한 오류는 기록하지 않는다. 그 항목은 10분 뒤 다른 쪽이 다시 맡는다.

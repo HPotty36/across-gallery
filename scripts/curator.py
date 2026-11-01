@@ -38,6 +38,10 @@ CLAUDE_BUSY = "Claude API 요청이 너무 많아요"
 CLAUDE_OFFLINE = "Claude API에 연결하지 못했어요"
 CLAUDE_REFUSED = "Claude가 이 사진의 초안을 거절했어요"
 CLAUDE_CUT_OFF = "Claude의 답이 끊겼어요"
+CLAUDE_STATUS = "Claude API 오류 "  # + the status, and maybe "(<type>, <request id>)"
+CLAUDE_UNREADABLE = "Claude의 답을 읽을 수 없어요 ("  # + the reason and ")"
+_CLAUDE_FAILURES = frozenset({CLAUDE_NO_KEY, CLAUDE_NO_PACKAGE, CLAUDE_BAD_KEY, CLAUDE_NO_ACCESS, CLAUDE_BUSY,
+                              CLAUDE_OFFLINE, CLAUDE_REFUSED, CLAUDE_CUT_OFF})
 # Anthropic's error type names: only one of these is put in a note, never whatever else an error body says
 CLAUDE_ERROR_TYPES = frozenset({"invalid_request_error", "authentication_error", "permission_error", "not_found_error",
                                 "request_too_large", "rate_limit_error", "api_error", "overloaded_error", "billing_error"})
@@ -300,14 +304,19 @@ def _claude_failure(err):
             return CuratorError(CLAUDE_NO_ACCESS, retry=False)
         if status == 429:
             return CuratorError(CLAUDE_BUSY)
-        return CuratorError(f"Claude API 오류 {status}{_status_detail(err)}")
+        return CuratorError(f"{CLAUDE_STATUS}{status}{_status_detail(err)}")
     if any(cls.__name__ in ("APIConnectionError", "APITimeoutError") for cls in type(err).__mro__):
         return CuratorError(CLAUDE_OFFLINE)
     return None
 
 
 def _unreadable(reason):
-    return CuratorError(f"Claude의 답을 읽을 수 없어요 ({reason})")
+    return CuratorError(f"{CLAUDE_UNREADABLE}{reason})")
+
+
+def is_claude_failure(message):
+    """Is `message` one that claude_draft fails with (so the note a Claude handoff leaves in item.json)?"""
+    return isinstance(message, str) and (message in _CLAUDE_FAILURES or message.startswith((CLAUDE_STATUS, CLAUDE_UNREADABLE)))
 
 
 def claude_draft(image, data, grayscale, *, model=None, client=None):

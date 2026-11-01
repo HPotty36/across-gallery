@@ -532,6 +532,46 @@ class HandoffTests(FakeRepo, unittest.TestCase):
         self.assertEqual(ollama.process("a"), "published")
         self.assertEqual(photolib.find_photo(self.photos(), "a")[1]["ai"]["model"], "gemma4:e4b-it-qat")
 
+    HANDED_OFF = (curator.CLAUDE_NO_KEY, curator.CLAUDE_NO_PACKAGE, curator.CLAUDE_BAD_KEY, curator.CLAUDE_NO_ACCESS,
+                  curator.CLAUDE_BUSY, curator.CLAUDE_OFFLINE, curator.CLAUDE_REFUSED, curator.CLAUDE_CUT_OFF,
+                  "Claude API 오류 500", "Claude API 오류 529 (overloaded_error, req_011CAbc)",
+                  "Claude의 답을 읽을 수 없어요 (모르는 방이에요)", worker.CRASHED)
+
+    def test_the_claude_pass_leaves_what_a_claude_pass_handed_off(self):
+        # asking Claude again would most likely fail the same way, and cost again; e4b and the PC take these
+        names = [f"h{n:02d}" for n in range(len(self.HANDED_OFF))]
+        for n, (name, error) in enumerate(zip(names, self.HANDED_OFF)):
+            self.put_item(name, error=error, uploaded_at=queue_items.iso(UPLOADED + timedelta(seconds=n)))
+        later = queue_items.iso(UPLOADED + timedelta(seconds=30))
+        self.put_item("pc", error=curator.OFF_MESSAGE, uploaded_at=later)  # handed back by the PC: Claude may manage it
+        self.put_item("new", uploaded_at=queue_items.iso(UPLOADED + timedelta(seconds=31)))
+        claude = self.github(FakeClaude(), "handoff", model="claude-opus-5-5")
+        self.assertEqual(claude.takeable(), ["pc", "new"])
+        before = self.fake.commits(R)
+        for name in names:
+            self.assertEqual(claude.process(name), "skipped")
+        self.assertEqual((self.fake.commits(R), claude.drafter.asked), (before, []))
+        self.assertEqual(self.github(FakeAI(), "fail").takeable(), names + ["pc", "new"])  # the e4b pass
+        self.assertEqual(self.w.takeable(), names + ["pc", "new"])  # the PC, five minutes after the upload
+        ollama = self.github(FakeAI(), "fail")
+        self.assertEqual(ollama.process("h06"), "published")
+        self.assertEqual(photolib.find_photo(self.photos(), "h06")[1]["ai"]["model"], "gemma4:e4b-it-qat")
+
+    def test_a_retry_from_the_admin_page_reaches_claude_again(self):
+        self.put_item("a")
+        claude = self.github(FakeClaude(fail=curator.CLAUDE_REFUSED), "handoff", model="claude-opus-5-5")
+        self.assertEqual(claude.process("a"), "handed off")
+        self.assertEqual(claude.takeable(), [])
+        self.assertEqual(self.github(FakeAI(fail=True), "fail").process("a"), "failed")  # e4b's claim cleared error
+        self.assertEqual(self.item("a")["error"], curator.OFF_MESSAGE)
+        # 다시 시도 in the admin page writes the item back as admin/lib/queue.js toWaiting does: error cleared
+        retried = {**self.item("a"), "status": "waiting", "error": None, "claimed_at": None, "by": None}
+        self.fake.put_file(R, "queue/a/item.json", dump_json(retried).encode("utf-8"))
+        claude.drafter = FakeClaude()
+        self.assertEqual(claude.takeable(), ["a"])
+        self.assertEqual(claude.process("a"), "published")
+        self.assertEqual(photolib.find_photo(self.photos(), "a")[1]["ai"]["model"], "claude-opus-5-5")
+
     def test_a_crash_in_fail_mode_is_still_recorded(self):
         self.put_item("a")
         with self.assertLogs("nocturne.worker", "ERROR"):
@@ -903,6 +943,16 @@ class MainTests(FakeRepo, unittest.TestCase):
         code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", "--only", "b", claude=claude)
         self.assertEqual((code, printed, output), (0, "published: b\n", "earlier=1\npublished=1\n"))
         self.assertEqual((self.item("a")["status"], self.item("late0")["status"]), ("waiting", "waiting"))
+    def test_a_later_claude_pass_leaves_a_handed_off_photo_to_e4b(self):
+        # e.g. the run's Ollama steps broke: the next run's Claude pass must not ask Claude (and pay) for it again
+        self.put_item("a")
+        self.run_main("--by", "github", "--run", "--ai", "claude", claude=FakeClaude(fail=curator.CLAUDE_REFUSED))
+        claude = FakeClaude()
+        code, printed, output = self.run_main("--by", "github", "--run", "--ai", "claude", claude=claude)
+        self.assertEqual((code, printed, output.splitlines()[-1], claude.asked), (0, "", "published=0", []))
+        self.assertEqual(self.run_main("--by", "github", "--check")[1], "a\n")
+        code, printed, _ = self.run_main("--by", "github", "--run", "--ai", "ollama", "--only", "a")
+        self.assertEqual((code, printed, self.queue_files("a")), (0, "published: a\n", []))
     def test_only_is_for_run(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.run_main("--by", "github", "--check", "--only", "a")

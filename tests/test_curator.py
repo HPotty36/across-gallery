@@ -490,6 +490,19 @@ class ClaudeDraftTests(unittest.TestCase):
         self.assertEqual(self.failure(error=APIStatusError(401, body=error_body("authentication_error"), request_id="req_1")),
                          "Claude API 키가 맞지 않아요")
 
+    def test_every_failure_message_is_known_as_a_claude_failure(self):
+        # the worker's Claude pass leaves alone an item whose error is one of these: an earlier pass handed it off
+        errors = [APIStatusError(status) for status in (400, 401, 402, 403, 404, 429, 500)]
+        errors += [APIStatusError(529, body=error_body("overloaded_error"), request_id="req_1"), APIConnectionError(), APITimeoutError()]
+        replies = [claude_response(GOOD_REPLY, stop_reason="refusal"), claude_response(GOOD_REPLY, stop_reason="max_tokens"),
+                   claude_response(text="not json"), claude_response(dict(GOOD_REPLY, room="nowhere")), claude_response(blocks=[])]
+        messages = [self.failure(error=error) for error in errors] + [self.failure(response=reply) for reply in replies]
+        for message in messages + [curator.CLAUDE_NO_KEY, curator.CLAUDE_NO_PACKAGE]:
+            self.assertTrue(curator.is_claude_failure(message), message)
+        for other in (curator.OFF_MESSAGE, "AI가 답을 주지 못했어요: JSON이 아니에요", "Ollama 오류 500: boom",
+                      "Ollama 연결 오류: timed out", "같은 이름의 사진이 이미 있어요", "", "Claude", None, 500):
+            self.assertFalse(curator.is_claude_failure(other), other)
+
     def test_unreadable_replies(self):
         unreadable = [
             claude_response(text="not json"),
