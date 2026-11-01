@@ -100,12 +100,12 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
 
 대기열 항목 `status`: `waiting` → `pc` 또는 `github`(맡아서 처리 중) → 게시되면 폴더 삭제 / `failed`. GitHub는 `waiting`을 바로, PC는 올린 지 5분 지난 것만 맡는다. 10분 넘게 끝나지 않은 맡김은 죽은 것으로 보고 다시 맡을 수 있다 (관리 페이지에서 버릴 수도 있다). 동시에 맡으려 하면 파일 sha 때문에 늦은 쪽이 물러난다.
 
-- Claude 단계에서 Claude가 못 쓰면(키·크레딧·API 오류, 거절, 맡은 뒤 예상 못 한 오류) `failed`로 두지 않고 `waiting`으로 넘긴다 (커밋 메시지 `대기열: <name> Claude 실패, Ollama로 넘김`, 이유는 `error`와 Actions 기록의 `Claude` 경고에 남는다). 같은 실행의 e4b 단계가 이어 맡는다. 이렇게 넘긴 사진(`error`가 Claude 실패 문구나 `AI 처리 중 문제가 생겼어요`인 `waiting`)은 다음 실행의 Claude 단계도 다시 맡지 않는다 (같은 실패를 되풀이하고 비용만 든다). e4b와 PC는 맡는다. 관리 페이지의 다시 시도는 `error`를 지우므로 그 뒤에는 Claude가 다시 맡는다. 이 메시지에는 `올림`도 `다시 시도`도 없어서 `draft.yml`을 다시 시작하지 않는다.
+- Claude 단계에서 Claude가 못 쓰면(키·크레딧·API 오류, 거절, 맡은 뒤 예상 못 한 오류) `failed`로 두지 않고 `waiting`으로 넘긴다 (커밋 메시지 `대기열: <name> Claude 실패, Ollama로 넘김`). 이유는 그 넘김 커밋의 `item.json` `error`와 Actions 기록의 `Claude` 경고에 남는다. e4b가 맡으면 `error`가 지워지므로 그 뒤에는 넘김 커밋이나 경고에서 본다. 같은 실행의 e4b 단계가 이어 맡는다. 이렇게 넘긴 사진(`error`가 Claude 실패 문구나 `AI 처리 중 문제가 생겼어요`인 `waiting`)은 다음 실행의 Claude 단계도 다시 맡지 않는다 (같은 실패를 되풀이하고 비용만 든다). e4b와 PC는 맡는다. 관리 페이지의 다시 시도는 `error`를 지우므로 그 뒤에는 Claude가 다시 맡는다. 넘김 커밋 메시지에는 `올림`도 `다시 시도`도 넣지 않는다 (아래).
 - PC의 AI가 못 쓰면(Ollama가 도중에 꺼짐, 모델이 답을 못 줌) `failed`로 두지 않고 `waiting`으로 돌려놓는다 (커밋 메시지 `대기열: <name> 다시 시도 (PC AI 실패)`, 이유는 `error`에 남는다). 그러면 `draft.yml`이 GitHub에서 맡고, PC 도우미는 그 항목을 30분 동안 건드리지 않는다.
 - `failed`가 되는 경우: e4b 단계의 AI가 실패, 대기열 사진 파일이 없거나 읽을 수 없음, 같은 이름의 사진이 이미 있음, e4b 단계나 PC에서 맡은 뒤 예상 못 한 오류(`AI 처리 중 문제가 생겼어요`, 자세한 내용은 Actions 기록이나 `helper.log`; Claude 단계에서는 위처럼 넘긴다). `failed`는 사람이 다시 시도를 눌러야 `waiting`이 된다.
 - GitHub에 닿지 못한 오류는 기록하지 않는다. 그 항목은 10분 뒤 다른 쪽이 다시 맡는다.
 
-`draft.yml`은 `queue/**` push 중 커밋 메시지에 `올림` 또는 `다시 시도`가 들어 있을 때만 일한다 (30분마다 도는 `schedule`과 수동 실행도 있다). 대기열 커밋 메시지를 바꿀 때 이 말을 지우지 말 것. 거꾸로 Claude가 넘기는 커밋에는 넣지 말 것 (넣으면 draft.yml이 다시 시작돼 같은 실패를 되풀이한다). 한 실행 안에서 Claude 단계가 맡을 수 있는 사진을 모두 쓰고 (Claude 단계가 도는 사이에 새로 올라온 사진도 Claude가 쓴다), 남은 사진이 있을 때만 Ollama와 모델을 준비해 e4b 단계가 그 남은 사진만 쓴다. Ollama를 준비하는 사이에 올라온 사진은 다음 실행의 Claude 단계가 쓴다 (그 사진의 올림 push로 다음 실행이 이미 줄 서 있다). 두 단계 중 하나라도 게시했으면 `gh workflow run site.yml`로 사이트를 직접 다시 만든다 (`GITHUB_TOKEN`으로 한 push는 다른 워크플로를 시작하지 않는다).
+`draft.yml`은 `queue/**` push 중 커밋 메시지에 `올림` 또는 `다시 시도`가 들어 있을 때만 일한다 (30분마다 도는 `schedule`과 수동 실행도 있다). 대기열 커밋 메시지를 바꿀 때 이 말을 지우지 말 것. 거꾸로 Claude가 넘기는 커밋에는 넣지 않는다. 이 커밋은 `GITHUB_TOKEN`으로 push되어 어차피 draft.yml을 다시 시작하지 못하지만, 다른 토큰으로 바뀌더라도 같은 실패를 되풀이하는 실행이 생기지 않게 막아 두는 것이다. 한 실행 안에서 Claude 단계가 맡을 수 있는 사진을 모두 쓰고 (Claude 단계가 도는 사이에 새로 올라온 사진도 Claude가 쓴다), 남은 사진이 있을 때만 Ollama와 모델을 준비해 e4b 단계가 그 남은 사진만 쓴다. Ollama를 준비하는 사이에 올라온 사진은 다음 실행의 Claude 단계가 쓴다 (그 사진의 올림 push로 다음 실행이 이미 줄 서 있다). 두 단계 중 하나라도 게시했으면 `gh workflow run site.yml`로 사이트를 직접 다시 만든다 (`GITHUB_TOKEN`으로 한 push는 다른 워크플로를 시작하지 않는다).
 
 ### 명령줄 대안
 
@@ -243,7 +243,7 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 
 - **Actions 기록**: https://github.com/HPotty36/nocturne/actions 에서 `Draft`(GitHub의 AI: Claude, e4b)와 `Site`(사이트 빌드)의 실행마다 단계별 기록을 본다. 관리 페이지 위쪽의 "반영 실패"도 여기로 이어진다. Draft를 잠시 끄려면 Actions 탭 왼쪽에서 `Draft` → 오른쪽 위 `…` → **Disable workflow** (명령줄은 `gh workflow disable draft.yml`, 다시 켜기는 `gh workflow enable draft.yml`). 꺼 둔 동안에는 PC 도우미가 올린 지 5분 지난 사진을 맡고, PC도 꺼져 있으면 사진은 대기열에 남는다.
 - **Claude가 못 쓸 때**: Draft 실행 화면에 `Claude` 경고가 `<name>: <이유>`로 뜬다 (같은 이유가 넘김 커밋의 `item.json` `error`에도 남는다). 그 사진은 같은 실행의 e4b가 이어 쓴다 (e4b도 실패하면 새 사진 탭에 남는다). 이유별로 할 일:
-  - `Claude API 키가 맞지 않아요`(또는 `Claude API 키가 없어요`): 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기).
+  - `Claude API 키가 맞지 않아요`: 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기).
   - `Claude API 권한이나 크레딧을 확인해 주세요`: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지, claude.ai의 크레딧 연결이 풀리지 않았는지 본다.
   - `Claude API 요청이 너무 많아요`: 잠시 뒤 저절로 풀린다. 계속되면 Console의 한도를 본다.
   - `Claude API 오류 <상태>`, `Claude API에 연결하지 못했어요`, `Claude의 답이 끊겼어요`, `Claude의 답을 읽을 수 없어요 (…)`: 대개 잠깐 문제다. 계속되면 Claude 단계 기록을 본다. `Claude API 오류` 뒤의 괄호에는 알려진 오류 종류(`api_error` 등)와 요청 ID(`req_…`)가 있으면 붙는다.

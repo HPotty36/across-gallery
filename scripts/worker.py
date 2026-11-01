@@ -9,8 +9,8 @@ folder, all in one commit, and only while the claim is still ours; so is recordi
 asking again cannot fix (a photo file is missing or unreadable, the name is taken, an unexpected error after the
 claim) is recorded as "failed" for a person to look at; trouble reaching GitHub is not, and the stale rule hands
 the item on. When the AI gives up, the worker's ai_failure decides: the e4b pass records "failed" ("fail"); the
-Claude pass hands the item off to waiting for the e4b pass of the same run ("handoff"), in a commit that does not
-start draft.yml again, and does the same with an unexpected error, so no photo is left stuck by a Claude-side bug;
+Claude pass hands the item off to waiting for the e4b pass of the same run ("handoff"), in a commit without the words
+that start draft.yml, and does the same with an unexpected error, so no photo is left stuck by a Claude-side bug;
 the PC hands it back to waiting for GitHub and leaves it alone for RELEASE_SKIP_SECONDS ("release").
 The PC helper also lets the PC model rewrite text that e4b wrote (upgrade_one, curator.UPGRADE_FROM), never
 text by Claude or by the PC model itself, a field a person edited or the room.
@@ -295,8 +295,9 @@ class Worker:
 
     def _handoff(self, name, claimed, note):
         """Hand the item off to waiting (`note` kept in error) for the next pass of the same run (Claude -> e4b).
-        "handed off", or "skipped" if it was no longer ours. The message has neither 올림 nor 다시 시도: either would
-        start draft.yml again, only to fail the same way. The item is not left alone: the next pass must take it."""
+        "handed off", or "skipped" if it was no longer ours. The message has neither 올림 nor 다시 시도, as a guard:
+        pushed with GITHUB_TOKEN it cannot start draft.yml anyway, but with another token either word would, only to
+        fail the same way. The next pass must take the item; only a later Claude pass leaves it alone (_may_take)."""
         if not self._hand_back(name, claimed, note, f"대기열: {name} Claude 실패, Ollama로 넘김"):
             return "skipped"
         self.handoffs[name] = note

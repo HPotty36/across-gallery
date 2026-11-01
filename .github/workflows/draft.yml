@@ -1,6 +1,6 @@
 name: Draft
 
-# GitHub 대타: 올린 사진을 GitHub가 바로 맡는다. 먼저 Claude가 초안을 쓰고 게시하고,
+# 올린 사진을 GitHub가 바로 맡는다. 먼저 Claude가 초안을 쓰고 게시하고,
 # Claude가 못 쓴 사진만 같은 실행 안에서 e4b(Ollama)가 이어서 쓴다.
 # PC 도우미는 올린 지 5분이 지나도 아무도 맡지 않은 사진을 가져간다.
 on:

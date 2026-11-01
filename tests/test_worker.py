@@ -482,7 +482,7 @@ class HandoffTests(FakeRepo, unittest.TestCase):
         self.assertEqual(self.item("a"), {**before, "error": "Claude API 권한이나 크레딧을 확인해 주세요"})
         messages = self.messages(2)
         self.assertEqual(messages, ["대기열: a Claude 실패, Ollama로 넘김", "대기열: a GitHub가 맡음"])
-        for word in ("올림", "다시 시도"):  # either would start draft.yml again, to fail the same way
+        for word in ("올림", "다시 시도"):  # a guard: pushed with any token but GITHUB_TOKEN, either would start draft.yml
             self.assertNotIn(word, messages[0])
         self.assertEqual((claude.released, self.queue_files("a"), list(self.work.iterdir())),
                          ({}, ["queue/a/full.jpg", "queue/a/item.json", "queue/a/thumb.jpg"], []))
