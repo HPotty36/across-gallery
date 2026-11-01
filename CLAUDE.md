@@ -140,7 +140,7 @@ curl -X PUT http://127.0.0.1:8790/_fake/login -d "{\"mode\":\"deny\"}"
    | Repository permissions | Contents: Read and write, Actions: Read-only (Metadata: Read-only는 자동) |
    | 설치할 수 있는 곳 | Only on this account |
 
-   **Create GitHub App** → 보이는 **Client ID**를 적어 둔다 (공개 값). 같은 화면에서 **Generate a new client secret** → client secret을 복사한다 (비밀 값, 다시 볼 수 없다. Worker에만 넣는다).
+   **Create GitHub App** → **General** 화면 위쪽 About에 보이는 **Client ID**(`Iv23…`, 숫자인 App ID가 아님)를 적어 둔다 (공개 값). client secret은 General이 아니라 왼쪽 **Credentials** 메뉴에 있다: **Generate a new client secret** → client secret을 복사한다 (비밀 값, 다시 볼 수 없다. Worker에만 넣는다).
 2. **App 설치**: App 화면 왼쪽 **Install App** → **Install** → **Only select repositories** → `nocturne`만. 설치하지 않으면 로그인은 되지만 쓰기가 막힌다.
 3. **Worker 올리기**: Cloudflare 무료 계정을 만든다. `<하위주소>.workers.dev`의 하위 주소는 관리 페이지 설정과 CSP에 공개로 들어가므로 실명이 아닌 이름으로 정한다. 대시보드 → **Workers & Pages** → **Create** → **Hello World**, 이름 `nocturne-auth` → **Edit code**에 `auth/worker.js` 내용을 통째로 붙여 넣고 **Deploy**. 그다음 Worker의 **Settings** → **Variables and Secrets**에 넣고 다시 Deploy:
    - `CLIENT_ID` (Text): App의 Client ID
