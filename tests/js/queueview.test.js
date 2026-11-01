@@ -624,6 +624,33 @@ test('직접 입력해서 게시: one commit reusing the queue blobs, photos.jso
   assert.deepEqual(store.data, expected);
 });
 
+test('직접 입력해서 게시 with an English title: trimmed, in the key order of photos.json, and an empty English text is left out', async () => {
+  const failed = { status: 'failed', error: 'AI 오류', date: '2025.11.30', camera: 'TestCam · f/2 · 1/60s · ISO 100' };
+  const fake = fakeGitHub({ [DATA]: site(), ...queued('x', failed) });
+  const store = makeStore(fake);
+  await store.load();
+  await store.publish(byName(store, 'x').key, { room: 'river', title: '다리 위', alt: '다리 위에서 본 강', title_en: ' T ', alt_en: '' });
+  const added = fake.json(DATA).rooms[0].photos.at(-1);
+  assert.deepEqual(Object.keys(added), ['file', 'title', 'alt', 'title_en', 'date', 'camera']);
+  assert.deepEqual(added, { file: 'x', title: '다리 위', alt: '다리 위에서 본 강', title_en: 'T', date: failed.date, camera: failed.camera });
+  assert.equal('alt_en' in added, false);
+  const expected = site();
+  expected.rooms[0].photos.push({ file: 'x', title: '다리 위', alt: '다리 위에서 본 강', title_en: 'T', date: failed.date, camera: failed.camera });
+  assert.equal(fake.value(DATA), serialize(expected), 'the text that is committed has the keys in order');
+});
+
+test('직접 입력해서 게시 with both English texts, and with spaces only', async () => {
+  const fake = fakeGitHub({ [DATA]: site(), ...queued('x', FAILED), ...queued('y', FAILED) });
+  const store = makeStore(fake);
+  await store.load();
+  await store.publish(byName(store, 'x').key, { room: 'night', title: '골목', alt: '가로등 아래 골목', title_en: 'Alley', alt_en: ' An alley under a lamp ' });
+  await store.publish(byName(store, 'y').key, { room: 'night', title: '골목 2', alt: '또 다른 골목', title_en: '   ', alt_en: '\n' });
+  const [x, y] = fake.json(DATA).rooms[1].photos.slice(-2);
+  assert.deepEqual(Object.keys(x), ['file', 'title', 'alt', 'title_en', 'alt_en']);
+  assert.equal(x.alt_en, 'An alley under a lamp');
+  assert.deepEqual(y, { file: 'y', title: '골목 2', alt: '또 다른 골목' });
+});
+
 test('직접 입력해서 게시 without a date or camera leaves them out', async () => {
   const fake = fakeGitHub({ [DATA]: site(), ...queued('x', { status: 'failed', error: 'AI 오류' }) });
   const store = makeStore(fake);

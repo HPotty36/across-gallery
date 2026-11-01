@@ -83,7 +83,8 @@ class AdminStaticTests(unittest.TestCase):
               "대표 사진은 다른 사진을 대표로 지정한 뒤 지울 수 있어요", "사이트 반영 중…", "반영됨", "반영 실패",
               "올리는 중…", "올리지 못했어요", "다시 올리기", "AI 대기", "PC AI가 보는 중…", "GitHub AI가 보는 중… (몇 분)",
               "AI 실패", "다시 시도", "직접 입력해서 게시", "버리기", "게시됨", "흑백 감지", "위치 정보 삭제됨",
-              "AI가 오래 걸리고 있어요", "버려도 올린 사진은 공개 저장소의 기록에 남아요"]
+              "AI가 오래 걸리고 있어요", "버려도 올린 사진은 공개 저장소의 기록에 남아요",
+              "영어 제목", "영어 설명", "AI 한국어", "AI 영어", "다듬기 대기"]
     def test_labels(self):
         t = "".join(p.read_text(encoding="utf-8") for p in js_files()) + (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
         for s in self.LABELS:

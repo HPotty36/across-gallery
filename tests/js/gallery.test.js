@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  SMALL_MODEL, CONFIDENT, GalleryError, serialize, allNames, addPhoto, deletePhoto, setCover, saveEdits, badges,
+  SMALL_MODEL, CONFIDENT, GalleryError, serialize, allNames, addPhoto, deletePhoto, setCover, saveEdits, badges, COVER_BADGE, REVIEW_BADGE,
 } from '../../admin/lib/gallery.js';
 
 const ROOT = new URL('../../', import.meta.url); // repo root, whatever the working directory
@@ -244,22 +244,141 @@ test('saveEdits refuses what it cannot do and then changes nothing', () => {
   assert.equal(serialize(d), before);
 });
 
+// --- saveEdits: the English texts -----------------------------------------------------------
+
+/** A one-photo site: the photo keeps the key order it is given here. */
+const withPhoto = (photo) => ({ site: {}, cover: photo.file, rooms: [{ id: 'river', name: '강', photos: [photo] }, { id: 'night', name: '밤', photos: [] }] });
+
+test('saveEdits english replaces in place', () => {
+  const d = site();
+  const p = d.rooms[1].photos[0]; // file, title, alt, date, title_en, alt_en
+  p.ai = { model: 'gemma4:12b-it-qat', fields: ['title_en', 'alt_en'], confidence: 0.5 };
+  saveEdits(d, 'n1', { title_en: 'Phone booth' });
+  assert.equal(d.rooms[1].photos[0], p, 'the same object');
+  assert.deepEqual(Object.keys(p), ['file', 'title', 'alt', 'date', 'title_en', 'alt_en', 'ai']);
+  assert.equal(p.title_en, 'Phone booth');
+  assert.equal(p.alt_en, 'A red payphone booth');
+  assert.deepEqual(p.ai, { model: 'gemma4:12b-it-qat', fields: ['alt_en'] });
+});
+
+test('saveEdits english empty deletes the key', () => {
+  const d = site();
+  const p = d.rooms[1].photos[0];
+  p.ai = { model: SMALL_MODEL, fields: ['title', 'alt_en'], confidence: 0.7 };
+  saveEdits(d, 'n1', { alt_en: '' });
+  assert.equal('alt_en' in p, false);
+  assert.equal(p.title_en, 'Payphone', 'the other English text stays');
+  assert.deepEqual(p.ai, { model: SMALL_MODEL, fields: ['title'] });
+  assert.ok(!serialize(d).includes('alt_en'), 'gone from the text that is committed');
+  assert.ok(serialize(d).includes('title_en'));
+});
+
+test('saveEdits english emptied on both keys removes ai when nothing else is left', () => {
+  const d = site();
+  const p = d.rooms[1].photos[0];
+  p.ai = { model: 'claude-opus-5-5', fields: ['title_en', 'alt_en'], confidence: 0.9 };
+  saveEdits(d, 'n1', { title_en: '', alt_en: '' });
+  assert.deepEqual(Object.keys(p), ['file', 'title', 'alt', 'date']);
+});
+
+test('saveEdits english added in order', () => {
+  const d = withPhoto({ file: 'p', title: '제목', alt: '설명', date: '2025.11.30', ai: { model: 'gemma4:12b-it-qat', fields: ['title'] } });
+  const p = d.rooms[0].photos[0];
+  const same = saveEdits(d, 'p', { title_en: 'A', alt_en: 'B' });
+  assert.equal(same, p, 'saveEdits hands back the same photo object');
+  assert.equal(d.rooms[0].photos[0], p);
+  assert.deepEqual(Object.keys(p), ['file', 'title', 'alt', 'title_en', 'alt_en', 'date', 'ai']);
+  assert.equal(p.title_en, 'A');
+  assert.equal(p.alt_en, 'B');
+});
+
+test('saveEdits english added one at a time still lands in canonical order', () => {
+  const d = withPhoto({ file: 'p', title: '제목', alt: '설명', date: 'd', camera: 'c' });
+  saveEdits(d, 'p', { alt_en: 'B' });
+  assert.deepEqual(Object.keys(d.rooms[0].photos[0]), ['file', 'title', 'alt', 'alt_en', 'date', 'camera']);
+  saveEdits(d, 'p', { title_en: 'A' });
+  assert.deepEqual(Object.keys(d.rooms[0].photos[0]), ['file', 'title', 'alt', 'title_en', 'alt_en', 'date', 'camera']);
+  assert.ok(serialize(d).includes('"alt":"설명","title_en":"A","alt_en":"B","date":"d","camera":"c"'));
+});
+
+test('saveEdits english added to a photo that has nothing after alt', () => {
+  const d = withPhoto({ file: 'p', title: '제목', alt: '설명' });
+  saveEdits(d, 'p', { title_en: 'A', alt_en: 'B' });
+  assert.deepEqual(Object.keys(d.rooms[0].photos[0]), ['file', 'title', 'alt', 'title_en', 'alt_en']);
+});
+
+test('saveEdits english absent and empty is no change', () => {
+  const d = withPhoto({ file: 'p', title: '제목', alt: '설명', date: 'd', ai: { model: SMALL_MODEL, fields: ['title', 'alt'], confidence: 0.4 } });
+  const p = d.rooms[0].photos[0];
+  saveEdits(d, 'p', { title_en: '' });
+  saveEdits(d, 'p', { alt_en: '', title_en: '   ' });
+  assert.deepEqual(Object.keys(p), ['file', 'title', 'alt', 'date', 'ai']);
+  assert.deepEqual(p.ai, { model: SMALL_MODEL, fields: ['title', 'alt'] }, 'only the confidence went');
+});
+
+test('saveEdits english with the same text is no change; a changed text leaves ai.fields', () => {
+  const d = site();
+  const p = d.rooms[1].photos[0];
+  p.ai = { model: SMALL_MODEL, fields: ['title', 'title_en'], confidence: 0.6 };
+  saveEdits(d, 'n1', { title_en: 'Payphone', alt_en: 'A red payphone booth' }); // what is stored already
+  assert.deepEqual(p.ai, { model: SMALL_MODEL, fields: ['title', 'title_en'] });
+  saveEdits(d, 'n1', { title_en: 'Telephone' });
+  assert.deepEqual(p.ai, { model: SMALL_MODEL, fields: ['title'] });
+});
+
+test('saveEdits english works together with a room move and Korean edits', () => {
+  const d = site();
+  const p = d.rooms[0].photos[1]; // a2 has no English
+  saveEdits(d, 'a2', { room: 'night', title: '새 제목', title_en: 'Under the bridge' });
+  assert.equal(d.rooms[1].photos.at(-1), p);
+  assert.deepEqual(Object.keys(p), ['file', 'title', 'alt', 'title_en', 'ai']);
+  assert.deepEqual(p.ai, { model: SMALL_MODEL, fields: ['alt'] });
+});
+
+test('saveEdits korean still required', () => {
+  const d = site();
+  const before = serialize(d);
+  assert.throws(() => saveEdits(d, 'a2', { title: '  ' }), new GalleryError('제목과 설명을 채워 주세요'));
+  assert.throws(() => saveEdits(d, 'a2', { title: 'x', alt: '', title_en: 'T' }), new GalleryError('제목과 설명을 채워 주세요'));
+  assert.throws(() => saveEdits(d, 'a2', { title_en: 5 }), GalleryError);
+  assert.throws(() => saveEdits(d, 'a2', { title: '제목', alt_en: null }), GalleryError);
+  assert.throws(() => saveEdits(d, 'a2', { alt_en: ['x'] }), GalleryError);
+  assert.throws(() => saveEdits(d, 'a2', { title_en: 'T', room: 'moon' }), new GalleryError('없는 방이에요: moon'));
+  assert.equal(serialize(d), before, 'a refused save changes nothing, English included');
+});
+
 // --- badges ---------------------------------------------------------------------------------
 
 test('badges', () => {
-  assert.deepEqual(badges(site().rooms[0].photos[1]), ['확인 필요', 'AI 설명 · 다듬기 대기']);
-  assert.deepEqual(badges({ai: {model: 'gemma4:12b-it-qat', fields: ['alt']}}), ['AI 설명']);
+  assert.deepEqual(badges(site().rooms[0].photos[1]), ['확인 필요', 'AI 한국어', '다듬기 대기']);
+  assert.deepEqual(badges({ai: {model: 'gemma4:12b-it-qat', fields: ['alt']}}), ['AI 한국어']);
   assert.deepEqual(badges({}), []);
+});
+
+test('badges say which language the AI wrote, in the order 확인 필요, AI 한국어, AI 영어, 다듬기 대기', () => {
+  assert.deepEqual(badges({ ai: { fields: ['title', 'alt', 'title_en', 'alt_en'], model: 'claude-opus-5-5', confidence: 0.5 } }),
+    ['확인 필요', 'AI 한국어', 'AI 영어']);
+  assert.deepEqual(badges({ ai: { fields: ['title_en'], model: SMALL_MODEL } }), ['AI 영어', '다듬기 대기']);
+  assert.deepEqual(badges({ ai: { fields: [], model: SMALL_MODEL, confidence: 0.9 } }), []);
+  assert.deepEqual(badges({ ai: { fields: ['alt_en', 'title'], model: SMALL_MODEL, confidence: 0.1 } }),
+    ['확인 필요', 'AI 한국어', 'AI 영어', '다듬기 대기'], 'one text of each language is enough for both badges');
+  assert.deepEqual(badges({ ai: { fields: ['alt_en'], model: 'gemma4:12b-it-qat' } }), ['AI 영어'], 'only the small model waits to be polished');
+});
+
+test('the 대표 사진 and 확인 필요 labels are exported for the exhibit view', () => {
+  assert.equal(COVER_BADGE, '대표 사진');
+  assert.equal(REVIEW_BADGE, '확인 필요');
 });
 
 test('badges edge cases', () => {
   const ai = (extra) => ({ ai: { model: 'gemma4:12b-it-qat', fields: ['title'], ...extra } });
-  assert.deepEqual(badges(ai({ confidence: 0.79 })), ['확인 필요', 'AI 설명']);
-  assert.deepEqual(badges(ai({ confidence: 0.8 })), ['AI 설명']);
-  assert.deepEqual(badges(ai({ confidence: 0 })), ['확인 필요', 'AI 설명']);
-  assert.deepEqual(badges(ai({ confidence: 1 })), ['AI 설명']);
+  assert.deepEqual(badges(ai({ confidence: 0.79 })), ['확인 필요', 'AI 한국어']);
+  assert.deepEqual(badges(ai({ confidence: 0.8 })), ['AI 한국어']);
+  assert.deepEqual(badges(ai({ confidence: 0 })), ['확인 필요', 'AI 한국어']);
+  assert.deepEqual(badges(ai({ confidence: 1 })), ['AI 한국어']);
   assert.deepEqual(badges(ai({ fields: [] })), []);
   assert.deepEqual(badges({ ai: { model: SMALL_MODEL, fields: [], confidence: 0.2 } }), ['확인 필요']);
-  assert.deepEqual(badges({ ai: { model: SMALL_MODEL, fields: ['title'] } }), ['AI 설명 · 다듬기 대기']);
+  assert.deepEqual(badges({ ai: { model: SMALL_MODEL, fields: ['title'] } }), ['AI 한국어', '다듬기 대기']);
+  assert.deepEqual(badges({ ai: { model: SMALL_MODEL } }), [], 'no fields at all');
   assert.deepEqual(badges(site().rooms[0].photos[0]), []);
 });

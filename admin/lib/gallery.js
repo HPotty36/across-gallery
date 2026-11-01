@@ -4,9 +4,15 @@
 
 export const SMALL_MODEL = 'gemma4:e4b-it-qat'; // the model whose AI texts still wait to be polished by the PC model
 export const CONFIDENT = 0.8; // room confidence below this is flagged "확인 필요"
+export const COVER_BADGE = '대표 사진'; // not from badges(): the view puts it first on the cover photo
+export const REVIEW_BADGE = '확인 필요';
 
-const EDITABLE = ['room', 'title', 'alt'];
-const TEXTS = ['title', 'alt']; // the photo texts an AI may write (ai.fields lists these)
+const REQUIRED = ['title', 'alt']; // the Korean texts: a photo always has them, a person cannot empty them
+const OPTIONAL = ['title_en', 'alt_en']; // the English texts: emptying one removes its key (the English page then shows the Korean)
+const TEXTS = [...REQUIRED, ...OPTIONAL]; // the photo texts an AI may write (ai.fields lists these)
+const EDITABLE = ['room', ...TEXTS];
+// where photos.json keeps a new English text: right after the last of these the photo has
+const AFTER = { title_en: ['alt'], alt_en: ['title_en', 'alt'] };
 
 export class GalleryError extends Error {
   /** A change the exhibition cannot make (unknown room or photo, duplicate name, ...). The message is shown to the user. */
@@ -89,10 +95,26 @@ export function setCover(data, name) {
   data.cover = name;
 }
 
+/** Set a text. A key the photo already has changes in place; a new English key goes where photos.json keeps it. */
+function putText(photo, key, value) {
+  const anchor = key in photo ? undefined : AFTER[key]?.find((k) => k in photo);
+  if (anchor === undefined) {
+    photo[key] = value;
+    return;
+  }
+  const keys = Object.keys(photo);
+  const later = keys.slice(keys.indexOf(anchor) + 1).map((k) => [k, photo[k]]);
+  for (const [k] of later) delete photo[k];
+  photo[key] = value;
+  for (const [k, v] of later) photo[k] = v; // the same object, with the keys after the new one put back in order
+}
+
 /**
- * Save what a person changed on one photo: changes may hold `room`, `title` and `alt`.
- * A new room takes the photo at its end. Saving counts as "a person looked at it": the AI confidence goes,
- * every text whose value really changed leaves ai.fields, and an empty ai.fields removes `ai`.
+ * Save what a person changed on one photo: changes may hold `room`, `title`, `alt`, `title_en` and `alt_en`.
+ * A new room takes the photo at its end. Title and description cannot be emptied; an English text given as ''
+ * is removed (nothing happens if the photo has none), and a new one lands after `alt` like photos.json writes it.
+ * Saving counts as "a person looked at it": the AI confidence goes, every text whose value really changed
+ * (or went) leaves ai.fields, and an empty ai.fields removes `ai`.
  * Everything is checked before anything is changed, so a refused save leaves `data` as it was.
  */
 export function saveEdits(data, name, changes) {
@@ -102,13 +124,19 @@ export function saveEdits(data, name, changes) {
     if (!EDITABLE.includes(key)) throw new GalleryError(`고칠 수 없는 항목이에요: ${key}`);
   }
   const edits = Object.fromEntries(given);
-  for (const key of TEXTS) {
+  for (const key of REQUIRED) {
     if (key in edits && (typeof edits[key] !== 'string' || !edits[key].trim())) throw new GalleryError('제목과 설명을 채워 주세요');
+  }
+  for (const key of OPTIONAL) {
+    if (key in edits && typeof edits[key] !== 'string') throw new GalleryError(`올바르지 않은 값이에요: ${key}`);
   }
   const to = 'room' in edits && edits.room !== from.id ? findRoom(data, edits.room) : null;
 
-  const changed = TEXTS.filter((key) => key in edits && edits[key] !== photo[key]);
-  for (const key of changed) photo[key] = edits[key];
+  const removed = OPTIONAL.filter((key) => key in edits && !edits[key].trim() && key in photo);
+  const written = TEXTS.filter((key) => key in edits && (REQUIRED.includes(key) || edits[key].trim()) && edits[key] !== photo[key]);
+  const changed = TEXTS.filter((key) => removed.includes(key) || written.includes(key));
+  for (const key of removed) delete photo[key];
+  for (const key of written) putText(photo, key, edits[key]);
   if (to) {
     from.photos.splice(from.photos.indexOf(photo), 1);
     to.photos.push(photo);
@@ -127,12 +155,18 @@ export function saveEdits(data, name, changes) {
 
 // --- badges ----------------------------------------------------------------------------------------------------
 
-/** Notes shown beside a photo: "확인 필요" (low confidence), then who wrote the AI text. */
+/**
+ * Notes shown beside a photo, in this order: "확인 필요" (low room confidence), "AI 한국어" and "AI 영어" (an AI text of
+ * that language is still there), "다듬기 대기" (the small model's texts, which the PC model will polish).
+ */
 export function badges(photo) {
   const out = [];
   const ai = photo.ai;
   if (!ai) return out;
-  if (typeof ai.confidence === 'number' && ai.confidence < CONFIDENT) out.push('확인 필요');
-  if (ai.fields?.length) out.push(ai.model === SMALL_MODEL ? 'AI 설명 · 다듬기 대기' : 'AI 설명');
+  const fields = ai.fields ?? [];
+  if (typeof ai.confidence === 'number' && ai.confidence < CONFIDENT) out.push(REVIEW_BADGE);
+  if (fields.some((key) => REQUIRED.includes(key))) out.push('AI 한국어');
+  if (fields.some((key) => OPTIONAL.includes(key))) out.push('AI 영어');
+  if (fields.length && ai.model === SMALL_MODEL) out.push('다듬기 대기');
   return out;
 }

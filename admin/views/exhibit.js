@@ -1,4 +1,5 @@
-// The "전시 중" tab: every exhibited photo by room, with its badges, room, title and description, and four actions:
+// The "전시 중" tab: every exhibited photo by room, with its badges, room, title and description (Korean, and the
+// optional English ones), and four actions:
 // 저장, 대표로 지정, 삭제 (after a confirm dialog) and AI로 다시 쓰기 (a redraft item in the queue).
 //
 // ExhibitStore (DOM-free, tested in Node) holds photos.json as the page knows it. Each change is one commit whose
@@ -10,15 +11,15 @@
 // page through textContent and value.
 
 import { AuthError, GitHubError } from '../lib/github.js';
-import { badges, deletePhoto, GalleryError, saveEdits, serialize, setCover } from '../lib/gallery.js';
+import { badges, COVER_BADGE, deletePhoto, GalleryError, REVIEW_BADGE, saveEdits, serialize, setCover } from '../lib/gallery.js';
 import { newItem } from '../lib/queue.js';
 
 const DATA = 'src/photos.json';
 const REDRAFT = 'redraft-'; // queue/redraft-<file>/item.json asks the AI to write a photo's title and description again
 const redraftPath = (file) => `queue/${REDRAFT}${file}/item.json`;
 const thumbSrc = (file) => `../photos/thumb/${encodeURIComponent(file)}.jpg`;
-const TEXTS = ['title', 'alt'];
-const STRONG = new Set(['대표 사진', '확인 필요']); // the badges that call for a look; the rest stay dim
+const TEXTS = ['title', 'alt', 'title_en', 'alt_en']; // an English text that photos.json does not have shows as ''
+const STRONG = new Set([COVER_BADGE, REVIEW_BADGE]); // the badges that call for a look; the rest stay dim
 
 const LOADING = '불러오는 중…';
 const REDRAFTING = 'AI가 다시 쓰는 중…';
@@ -45,8 +46,9 @@ function titleOf(data, file) {
 
 /**
  * What 저장 sends for a row: only the fields the person changed, i.e. whose value differs from what the row last
- * showed (`shown`: {room, title, alt}); title and description are compared and sent trimmed. A field left alone is
- * not sent, so it can never overwrite a newer value saved elsewhere (another device, the AI).
+ * showed (`shown`: {room, title, alt, title_en, alt_en}, an absent English text is ''); the texts are compared and
+ * sent trimmed. A cleared English text is sent as '' (it is removed); one that was absent and is still empty is not
+ * sent. A field left alone is not sent, so it can never overwrite a newer value saved elsewhere (another device, the AI).
  */
 export function editsFor(shown, typed) {
   const edits = {};
@@ -350,10 +352,16 @@ function makeRow(v, file) {
   const figure = el('figure', 'row-thumb', img);
   img.addEventListener('error', () => figure.classList.add('is-missing')); // not on the site yet (published a moment ago)
 
-  const field = (label, control, id, wide = false) => {
+  const marks = {}; // photo key -> the " · AI" in that field's label, shown while the AI wrote the text
+  const field = (label, control, id, { key = '', wide = false } = {}) => {
     control.id = id;
     const tag = el('label', '', label);
     tag.htmlFor = id;
+    if (key) {
+      marks[key] = el('span', 'ai-mark', ' · AI');
+      marks[key].hidden = true;
+      tag.append(marks[key]);
+    }
     return el('div', wide ? 'field field-wide' : 'field', tag, control);
   };
   const room = el('select');
@@ -362,8 +370,19 @@ function makeRow(v, file) {
   title.autocomplete = 'off';
   const alt = el('textarea');
   alt.rows = 2;
+  const titleEn = el('input');
+  titleEn.type = 'text';
+  titleEn.autocomplete = 'off';
+  titleEn.lang = 'en';
+  const altEn = el('textarea');
+  altEn.rows = 2;
+  altEn.lang = 'en';
   const fields = el('div', 'row-fields',
-    field('방', room, `ex-room-of-${file}`), field('제목', title, `ex-title-${file}`), field('설명', alt, `ex-alt-${file}`, true));
+    field('방', room, `ex-room-of-${file}`),
+    field('제목', title, `ex-title-${file}`, { key: 'title' }),
+    field('설명', alt, `ex-alt-${file}`, { key: 'alt', wide: true }),
+    field('영어 제목', titleEn, `ex-en-title-${file}`, { key: 'title_en', wide: true }),
+    field('영어 설명', altEn, `ex-en-alt-${file}`, { key: 'alt_en', wide: true }));
 
   const save = button('저장', 'btn btn-main');
   const redraft = button('AI로 다시 쓰기', 'btn');
@@ -378,8 +397,9 @@ function makeRow(v, file) {
 
   const group = el('div', 'row', figure, el('div', 'row-body', tags, fields, el('div', 'row-actions', save, redraft, cover, remove, coverNote), msg));
   group.setAttribute('role', 'group');
-  const row = { file, node: el('li', '', group), group, img, tags, room, title, alt, save, redraft, cover, remove, coverNote, msg,
-    optionsKey: '', shown: null, photo: null, busy: false };
+  // the text controls by photo key, in TEXTS order
+  const row = { file, node: el('li', '', group), group, img, tags, room, texts: { title, alt, title_en: titleEn, alt_en: altEn }, marks, save, redraft,
+    cover, remove, coverNote, msg, optionsKey: '', shown: null, photo: null, busy: false };
   v.rows.set(file, row);
 
   const on = (b, action) => b.addEventListener('click', () => {
@@ -416,7 +436,7 @@ function fillRow(v, row, photo, roomId, roomOptions, optionsKey) {
   if (row.img.alt !== photo.alt) row.img.alt = photo.alt;
 
   const tags = badges(photo);
-  if (isCover) tags.unshift('대표 사진');
+  if (isCover) tags.unshift(COVER_BADGE);
   row.tags.replaceChildren(...tags.flatMap((text, i) => {
     const node = STRONG.has(text) ? el('span', 'tag-strong', text) : text;
     return i === 0 ? [node] : [' · ', node];
@@ -436,9 +456,14 @@ function fillRow(v, row, photo, roomId, roomOptions, optionsKey) {
   } else if (!before || row.room.value === before.room) {
     row.room.value = roomId;
   }
-  if (!before || row.title.value === before.title) row.title.value = photo.title;
-  if (!before || row.alt.value === before.alt) row.alt.value = photo.alt;
-  row.shown = { room: roomId, title: photo.title, alt: photo.alt };
+  const shown = { room: roomId };
+  const aiFields = photo.ai?.fields ?? [];
+  for (const key of TEXTS) {
+    shown[key] = photo[key] ?? ''; // an English text photos.json does not have shows as an empty field
+    if (!before || row.texts[key].value === before[key]) row.texts[key].value = shown[key];
+    row.marks[key].hidden = !aiFields.includes(key);
+  }
+  row.shown = shown;
 
   row.cover.hidden = isCover;
   row.remove.hidden = isCover;
@@ -476,7 +501,7 @@ async function act(v, row, busyText, task) {
 }
 
 async function saveRow(v, row) {
-  const typed = { room: row.room.value, title: row.title.value, alt: row.alt.value };
+  const typed = { room: row.room.value, ...Object.fromEntries(TEXTS.map((key) => [key, row.texts[key].value])) };
   let changes;
   try {
     changes = v.store.edits(row.file, row.shown, typed); // only what the person changed; checked before anything is sent

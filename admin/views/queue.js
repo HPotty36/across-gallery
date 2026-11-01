@@ -450,14 +450,19 @@ export class QueueStore {
    * 직접 입력해서 게시 (a new item the AI gave up on): one commit puts the two queue photos on show (their blobs reused),
    * adds the photo at the end of `room` in photos.json (no `ai`: a person wrote it), and deletes the queue folder;
    * built only if at that commit item.json is still this upload and still failed.
-   * Title and description are trimmed; empty is a GalleryError before anything is sent.
+   * Title and description are trimmed; empty is a GalleryError before anything is sent. The English title and
+   * description are optional: those that are filled (trimmed) join the entry, in photos.json order, after `alt`.
    * Resolves to {sha, why}: the commit sha (the card is then "published") and why null; or sha null and why
    * "published" (the AI published it first; the card is "published") or "changed" (retried elsewhere, thrown away,
    * or another upload took the name: nothing was written, the next look shows what is there).
    */
-  async publish(key, { room, title, alt }) {
+  async publish(key, { room, title, alt, title_en, alt_en }) {
     const texts = { title: String(title ?? '').trim(), alt: String(alt ?? '').trim() };
     if (!texts.title || !texts.alt) throw new GalleryError(FILL);
+    for (const [name, value] of [['title_en', title_en], ['alt_en', alt_en]]) {
+      const text = String(value ?? '').trim();
+      if (text) texts[name] = text; // only what is filled in; the order is photos.json's: title, alt, title_en, alt_en
+    }
     return this.#serial(async () => {
       const card = this.cards.get(key);
       if (card?.stage !== 'queue' || card.item?.kind !== 'new') return { sha: null, why: 'changed' };
@@ -854,17 +859,26 @@ function buildForm(id) {
   title.autocomplete = 'off';
   const alt = el('textarea');
   alt.rows = 2;
+  const titleEn = el('input'); // the English texts are optional: left empty, the English page shows the Korean
+  titleEn.type = 'text';
+  titleEn.autocomplete = 'off';
+  titleEn.lang = 'en';
+  const altEn = el('textarea');
+  altEn.rows = 2;
+  altEn.lang = 'en';
   const submit = el('button', 'btn btn-main', '게시');
   submit.type = 'submit';
   const cancel = button('취소', 'btn btn-quiet');
   const node = el('form', 'q-manual',
-    el('div', 'row-fields', field('방', room, 'room'), field('제목', title, 'title'), field('설명', alt, 'alt', true)),
+    el('div', 'row-fields',
+      field('방', room, 'room'), field('제목', title, 'title'), field('설명', alt, 'alt', true),
+      field('영어 제목', titleEn, 'title-en', true), field('영어 설명', altEn, 'alt-en', true)),
     el('div', 'q-actions', submit, cancel));
   node.id = `${id}-form`;
   node.noValidate = true;
   node.hidden = true;
   node.setAttribute('aria-label', '직접 입력해서 게시');
-  return { node, room, title, alt, submit, cancel };
+  return { node, room, title, alt, titleEn, altEn, submit, cancel };
 }
 
 /** Bring a card's text, thumbnail, information line and buttons up to date with the store. */
@@ -1048,7 +1062,9 @@ async function discardCard(v, node) {
 
 async function publishCard(v, node) {
   const { form } = node;
-  const fields = { room: form.room.value, title: form.title.value, alt: form.alt.value };
+  const fields = {
+    room: form.room.value, title: form.title.value, alt: form.alt.value, title_en: form.titleEn.value, alt_en: form.altEn.value,
+  };
   const done = await act(v, node, '게시하는 중…', () => v.store.publish(node.key, fields));
   if (!done.ok) return;
   const { sha, why } = done.value;
@@ -1068,6 +1084,8 @@ async function publishCard(v, node) {
   }
   form.title.value = '';
   form.alt.value = '';
+  form.titleEn.value = '';
+  form.altEn.value = '';
   openForm(v, node, false);
   draw(v);
   node.status.focus(); // reads 게시됨

@@ -79,7 +79,7 @@ function fakeGitHub(files) {
 const photo = (data, file) => data.rooms.flatMap((r) => r.photos.map((p) => ({ ...p, room: r.id }))).find((p) => p.file === file);
 const shownOf = (data, file) => {
   const p = photo(data, file);
-  return { room: p.room, title: p.title, alt: p.alt };
+  return { room: p.room, title: p.title, alt: p.alt, title_en: p.title_en ?? '', alt_en: p.alt_en ?? '' }; // an absent English text shows as ''
 };
 
 async function opened(files = { [DATA]: site() }) {
@@ -92,13 +92,32 @@ async function opened(files = { [DATA]: site() }) {
 // --- editsFor: only what the person changed ---------------------------------------------------
 
 test('editsFor sends only the fields that differ from what the row showed', () => {
-  const shown = { room: 'river', title: '다리 아래', alt: '다리 상판' };
+  const shown = { room: 'river', title: '다리 아래', alt: '다리 상판', title_en: '', alt_en: '' };
   assert.deepEqual(editsFor(shown, { ...shown }), {});
   assert.deepEqual(editsFor(shown, { ...shown, title: '  새 제목 ' }), { title: '새 제목' });
   assert.deepEqual(editsFor(shown, { ...shown, room: 'night' }), { room: 'night' });
   assert.deepEqual(editsFor(shown, { ...shown, alt: '다리 상판   ' }), {}, 'spaces around the text are not a change');
-  assert.deepEqual(editsFor(shown, { room: 'night', title: 'a', alt: 'b' }), { room: 'night', title: 'a', alt: 'b' });
+  assert.deepEqual(editsFor(shown, { ...shown, room: 'night', title: 'a', alt: 'b' }), { room: 'night', title: 'a', alt: 'b' });
   assert.deepEqual(editsFor(shown, { ...shown, title: '   ' }), { title: '' }, 'an emptied field is a change (refused later)');
+});
+
+test('editsFor sends a changed English text trimmed, and only that', () => {
+  const shown = { room: 'river', title: '다리 아래', alt: '다리 상판', title_en: 'Under the bridge', alt_en: '' };
+  assert.deepEqual(editsFor(shown, { ...shown, title_en: '  Beneath the bridge ' }), { title_en: 'Beneath the bridge' });
+  assert.deepEqual(editsFor(shown, { ...shown, title_en: 'Under the bridge  ' }), {}, 'spaces around the text are not a change');
+  assert.deepEqual(editsFor(shown, { ...shown, alt_en: ' The deck of a bridge ' }), { alt_en: 'The deck of a bridge' }, 'a text that was absent can be added');
+});
+
+test('editsFor sends an empty English text when it was cleared, so it is deleted', () => {
+  const shown = { room: 'river', title: '다리 아래', alt: '다리 상판', title_en: 'T', alt_en: 'x' };
+  assert.deepEqual(editsFor(shown, { ...shown, alt_en: '' }), { alt_en: '' });
+  assert.deepEqual(editsFor(shown, { ...shown, alt_en: '   ', title_en: '' }), { title_en: '', alt_en: '' }, 'spaces only is cleared too');
+});
+
+test('editsFor sends nothing for an English text that was absent and is still empty', () => {
+  const shown = { room: 'river', title: '다리 아래', alt: '다리 상판', title_en: '', alt_en: '' };
+  assert.deepEqual(editsFor(shown, { ...shown, title_en: '  ' }), {});
+  assert.deepEqual(editsFor(shown, { ...shown, title_en: '', alt_en: '\n ' }), {});
 });
 
 test('store.edits checks the changes before anything is sent', async () => {
@@ -108,6 +127,38 @@ test('store.edits checks the changes before anything is sent', async () => {
   assert.throws(() => store.edits('a2', shown, { ...shown, room: 'nowhere' }), GalleryError);
   assert.deepEqual(store.edits('a2', shown, { ...shown, alt: ' 새 설명 ' }), { alt: '새 설명' });
   assert.equal(fake.commits.length, 0);
+});
+
+test('saving English texts commits them in order after alt, and clearing one deletes its key', async () => {
+  const { fake, store } = await opened();
+  const shown = shownOf(store.data, 'a2'); // a2 has no English texts
+  const changes = store.edits('a2', shown, { ...shown, title_en: ' Under the bridge ', alt_en: ' The deck of a bridge ' });
+  assert.deepEqual(changes, { title_en: 'Under the bridge', alt_en: 'The deck of a bridge' });
+  await store.save('a2', changes);
+  const saved = fake.data().rooms[0].photos[1];
+  assert.deepEqual(Object.keys(saved), ['file', 'title', 'alt', 'title_en', 'alt_en', 'ai']);
+  assert.deepEqual(saved.ai, { model: 'gemma4:e4b-it-qat', fields: ['title', 'alt'] });
+  assert.equal(fake.text(DATA), serialize(fake.data()), 'canonical photos.json');
+
+  const again = shownOf(store.data, 'a2');
+  assert.equal(again.title_en, 'Under the bridge');
+  await store.save('a2', store.edits('a2', again, { ...again, alt_en: '  ' }));
+  const cleared = photo(fake.data(), 'a2');
+  assert.equal('alt_en' in cleared, false);
+  assert.equal(cleared.title_en, 'Under the bridge');
+  assert.equal(fake.commits.length, 2);
+  const line = fake.text(DATA).split('\n').find((text) => text.includes('"file":"a2"'));
+  assert.ok(line.includes('"title_en":"Under the bridge"') && !line.includes('alt_en'), 'gone from the committed text of a2');
+});
+
+test('a stale tab that never touched the English texts keeps what another device wrote', async () => {
+  const { fake, store } = await opened();
+  const shown = shownOf(store.data, 'a2');
+  fake.edit((data) => { Object.assign(data.rooms[0].photos[1], { title_en: 'Written elsewhere' }); });
+  const changes = store.edits('a2', shown, { ...shown, alt: '새 설명' });
+  assert.deepEqual(changes, { alt: '새 설명' }, 'the empty English fields are not sent');
+  await store.save('a2', changes);
+  assert.equal(photo(fake.data(), 'a2').title_en, 'Written elsewhere');
 });
 
 // --- 저장 never overwrites what the person did not touch --------------------------------------
