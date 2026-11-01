@@ -1,8 +1,8 @@
 /* Nocturne's service worker: keeps the exhibition on the device, so an installed site opens without a network.
 
    This file is a template. scripts/build.py writes sw.js next to index.html with the three constants below filled
-   in: VERSION (a hash of both pages, the manifest and this file, so any change to the site gives the browser a
-   new worker), PHOTOS (the hashed thumb and full URLs of every photo on show, relative to the scope) and COVER
+   in: VERSION (a hash of both pages, the manifest, the icons and this file, so any change to the site gives the
+   browser a new worker), PHOTOS (the hashed thumb and full URLs of every photo on show, relative to the scope) and COVER
    (the full-size URL of the cover, or empty). Unfilled, the file is still valid JavaScript: the node tests
    (tests/js/sw.test.js) run it in node:vm and call the three decisions below, and it only listens for events
    when it runs as a service worker.
@@ -124,7 +124,9 @@ if (typeof ServiceWorkerGlobalScope !== 'undefined') {
 
   /* A page: the network if it answers well (ok) within TIMEOUT; otherwise (no network, too slow, 404 or 500) the
      copy on the device; with no copy, whatever the network gives, however long it takes. Every good answer
-     refreshes the copy, even a late one; an error page never covers the exhibition. */
+     refreshes the copy, even a late one; an error page never covers the exhibition. A redirect (a navigation
+     is fetched with redirect: 'manual', so it comes back as an opaque redirect) is no failure: it is handed on as
+     it is, never kept, and the browser follows it, so a site that moved never traps a device in its old copy. */
   const page = async (event) => {
     const path = new URL(event.request.url).pathname.slice(new URL(scope).pathname.length);
     const key = at(path.startsWith('en/') ? 'en/' : './');
@@ -132,7 +134,7 @@ if (typeof ServiceWorkerGlobalScope !== 'undefined') {
     let timer;
     const early = await Promise.race([network, new Promise((resolve) => { timer = setTimeout(resolve, TIMEOUT, null); })]);
     clearTimeout(timer);
-    if (early && early.ok) return early;
+    if (early && (early.ok || early.type === 'opaqueredirect')) return early;
     return (await cached(PAGE, key)) || network;
   };
 

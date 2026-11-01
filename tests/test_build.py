@@ -139,6 +139,39 @@ class BuildTests(unittest.TestCase):
     def test_footer_links_to_the_admin_page(self):
         self.assertEqual(self.html().count('<a class="foot-admin" href="admin/">관리</a>'), 2)
 
+    def css(self):
+        return re.search(r"<style>(.*?)</style>", self.html(), re.S).group(1)
+
+    def test_side_bullet_is_not_read_aloud(self):
+        # the plain declaration first (browsers that do not know the alt-text form keep it), then the silent one
+        self.assertIn(r'content: "\2022"; content: "\2022" / "";', self.css())
+
+    def test_coarse_pointer_keeps_viewer_buttons_big(self):
+        # from 960px the buttons are 24px tall; a finger on a big screen still gets 40px
+        self.assertRegex(self.css(), r"@media \(pointer: coarse\) \{\s*\.lb-link \{[^}]*min-height: 40px;")
+
+    def test_cover_label_is_never_wider_than_the_print(self):
+        css = self.css()
+        self.assertRegex(css, r"@supports \(width: 1cqi\) \{[^@]*\.cover \{[^}]*width: min-content;[^}]*max-width: 100%;")
+        self.assertIn(".cover-btn { width: min(100cqi,", css)  # the print itself is sized in the same block
+
+    def test_side_column_scrolls_when_the_window_is_short(self):
+        side = re.search(r"\.side \{[^}]*overflow-y: auto;[^}]*\}", self.css())
+        self.assertIsNotNone(side)
+        self.assertIn("scrollbar-width: thin;", side.group(0))  # a thin bar, and only when it overflows
+
+    def test_phone_footer_admin_link_is_underlined(self):
+        self.assertRegex(self.css(), r"\.foot \.foot-admin \{[^}]*text-decoration: underline;")
+
+    def test_viewer_ignores_a_late_original(self):
+        self.assertIn("if (!lb.hidden && idx === want) lbImg.src = full.src;", self.html())  # nothing is set once it is shut
+
+    def test_phone_menu_script(self):
+        html = self.html()
+        self.assertIn("menu.addEventListener('focusout'", html)  # focus leaving the menu folds it
+        self.assertIn("e.stopPropagation()", html)  # the tap that folds it does not also press what is under it
+        self.assertIn("}, true);", html)  # ... caught before the target sees the click
+
     def test_escapes_text(self):
         data = photolib.load_data(self.root); data["rooms"][0]["photos"][1]["title"] = "<b>&"
         photolib.save_data(self.root, data)
@@ -212,6 +245,17 @@ class PwaTests(unittest.TestCase):
         data["rooms"][1]["photos"][0]["alt_en"] = "Another payphone"  # only the English page changes
         photolib.save_data(self.root, data)
         self.assertNotEqual(self.version(), second)
+
+    def test_sw_version_covers_icons(self):
+        first = self.version()
+        icon = self.root / "icons" / "icon-192.png"
+        data = bytearray(icon.read_bytes())
+        data[-1] ^= 0x01  # one byte of one icon, nothing else on the site
+        icon.write_bytes(bytes(data))
+        changed = self.version()
+        self.assertNotEqual(changed, first)  # an icon-only change still gives installed devices a new worker
+        (self.root / "icons" / "extra.png").write_bytes(b"x")
+        self.assertNotEqual(self.version(), changed)  # and so does an icon added
 
     def test_sw_cover(self):
         self.assertEqual(self.cover(), build.asset_url(self.root, "full", "a1"))  # the full-size print, not the thumbnail

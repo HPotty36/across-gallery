@@ -229,13 +229,22 @@ def manifest_text(description):
     return json.dumps({**MANIFEST, "description": description}, ensure_ascii=False, indent=2) + "\n"
 
 
-def sw_text(template, pages, manifest, photos, cover):
+def icon_files(root):
+    """[(name, bytes)] of every file under icons/, in name order (an empty list when there is no icons/ folder)."""
+    folder = Path(root) / "icons"
+    if not folder.is_dir():
+        return []
+    return [(p.relative_to(folder).as_posix(), p.read_bytes()) for p in sorted(folder.rglob("*")) if p.is_file()]
+
+
+def sw_text(template, pages, manifest, photos, cover, icons=()):
     """sw.js: the src/sw.js template with VERSION, PHOTOS and COVER filled in.
 
-    VERSION is the first 12 hex of a sha256 over the Korean page, the English page, the manifest and the template,
-    so the browser takes a new service worker whenever anything on the site changes (and only then). PHOTOS is the
-    {thumb, full} URLs of every photo on show, in page order. COVER is the full-size URL of the cover ("" when none
-    is hung): the cover page loads it before the worker controls the page, so the worker fetches it itself.
+    VERSION is the first 12 hex of a sha256 over the Korean page, the English page, the manifest, the template and
+    every icon (name and bytes, in name order), so the browser takes a new service worker whenever anything on the
+    site changes (and only then): a new icon alone is enough. PHOTOS is the {thumb, full} URLs of every photo on
+    show, in page order. COVER is the full-size URL of the cover ("" when none is hung): the cover page loads it
+    before the worker controls the page, so the worker fetches it itself.
     """
     for mark in (SW_VERSION, SW_PHOTOS, SW_COVER):
         if template.count(mark) != 1:
@@ -243,6 +252,8 @@ def sw_text(template, pages, manifest, photos, cover):
     digest = hashlib.sha256()
     for text in (pages["ko"], pages["en"], manifest, template):
         digest.update(text.encode("utf-8"))
+    for name, data in icons:
+        digest.update(name.encode("utf-8") + b"\x00" + data)
     return (template.replace(SW_VERSION, f"'{digest.hexdigest()[:12]}'").replace(SW_PHOTOS, json.dumps(photos))
             .replace(SW_COVER, json.dumps(cover)))
 
@@ -272,7 +283,7 @@ def build(root, out=None):
     manifest = manifest_text(data["site"]["description"].format(total=total))
     photos = [{"thumb": facts[p["file"]]["thumb"], "full": facts[p["file"]]["full"]} for r in rooms for p in r["photos"]]
     cover = facts[data["cover"]]["full"] if data.get("cover") in facts else ""  # only a cover that is hung counts
-    sw = sw_text((root / "src" / "sw.js").read_text(encoding="utf-8"), pages, manifest, photos, cover)
+    sw = sw_text((root / "src" / "sw.js").read_text(encoding="utf-8"), pages, manifest, photos, cover, icon_files(root))
 
     dest = root if out is None else Path(out)
     files = {**{page["file"]: pages[lang] for lang, page in PAGES.items()}, "manifest.webmanifest": manifest, "sw.js": sw}

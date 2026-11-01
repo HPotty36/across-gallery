@@ -72,7 +72,8 @@ async function install({ cover, cached = {}, network = () => ({ ok: true, type: 
   const source = template.replace("'__VERSION__'", "'test'").replace('[/*__PHOTOS__*/]', JSON.stringify(PHOTOS))
     .replace("'' /*__COVER__*/", JSON.stringify(cover));
   const ctx = vm.createContext({
-    URL, Promise, caches, ServiceWorkerGlobalScope: class {},
+    URL, Promise, setTimeout, clearTimeout, caches, ServiceWorkerGlobalScope: class {},
+    Response: { error: () => ({ ok: false, type: 'error' }) },
     Request: class { constructor(url) { this.url = url; } },
     fetch: async (url) => { fetched.push(url); return network(url); },
     self: { registration: { scope: S }, addEventListener: (type, fn) => { listeners[type] = fn; },
@@ -124,4 +125,44 @@ test("activate drops this site's old caches but keeps nocturne-share (the admin 
   assert.deepEqual([...r.stores.get('nocturne-share').keys()], [S + 'admin/share/1-0']);  // the shared photo is still there
   assert.ok(r.stores.has('other'));
   for (const name of ['nocturne-page', 'nocturne-thumbs', 'nocturne-full']) assert.ok(r.stores.has(name), name);
+});
+
+// A page request, as the fetch listener sees it. `answer` is what the network gives for it. Resolves to the response the
+// page gets, with what the network answer was cloned into the cache (nothing, when the worker keeps nothing).
+async function openPage(answer, cached) {
+  const request = { url: S, method: 'GET', mode: 'navigate' };
+  const r = await install({ cover: '', network: (what) => (what === request ? answer : { ok: true, type: 'basic' }) });
+  if (!cached) r.stores.get('nocturne-page').delete(S);  // install kept the page; this device has no copy
+  const before = r.stores.get('nocturne-page').get(S);
+  const pending = [];
+  let reply;
+  r.listeners.fetch({ request, waitUntil: (p) => pending.push(p), respondWith: (p) => { reply = p; } });
+  const response = await reply;
+  await Promise.all(pending);
+  return { response, before, after: r.stores.get('nocturne-page').get(S) };
+}
+
+test('page opaqueredirect is passed through', async () => {
+  // a moved site: the network answers with a redirect the worker must not follow; the browser does
+  const moved = { ok: false, type: 'opaqueredirect', clone() { throw new Error('a redirect is never kept'); } };
+  const withCopy = await openPage(moved, true);
+  assert.equal(withCopy.response, moved);  // returned as it is, not the old copy
+  assert.equal(withCopy.after, withCopy.before);  // and nothing was put into nocturne-page
+  const without = await openPage(moved, false);
+  assert.equal(without.response, moved);
+  assert.equal(without.after, undefined);
+});
+
+test('page: an error page from the network still gives way to the copy on the device', async () => {
+  const broken = { ok: false, type: 'basic', status: 500, clone() { throw new Error('an error page is never kept'); } };
+  const r = await openPage(broken, true);
+  assert.equal(r.response, r.before);
+  assert.equal(r.after, r.before);
+});
+
+test('page: a good answer is returned and refreshes the copy', async () => {
+  const fresh = { ok: true, type: 'basic', clone() { return { copy: true }; } };
+  const r = await openPage(fresh, true);
+  assert.equal(r.response, fresh);
+  assert.deepEqual(r.after, { copy: true });
 });

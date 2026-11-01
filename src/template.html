@@ -114,6 +114,7 @@ h2 { font: inherit; }
 }
 @supports (width: 1cqi) {
   .cover-btn { width: min(100cqi, (100svh - var(--bar) - 8rem) * var(--r)); }
+  .cover { width: min-content; max-width: 100%; }  /* a tall print is narrower than the column: its label wraps at the print's edge */
 }
 .cover-btn img { display: block; width: 100%; height: auto; }
 
@@ -166,10 +167,11 @@ h2 { font: inherit; }
   font-size: 12px;
   color: var(--ink-dim);
 }
+.foot .foot-admin { text-decoration: underline; text-underline-offset: 0.2em; }  /* tells it from the fine print around it */
 
 /* ---------- wide screens: the side column stays while the photos scroll ---------- */
 @media (min-width: 960px) {
-  :root { --bar: 0px; --lead: var(--edge); }
+  :root { --bar: 0px; --lead: var(--edge); --bleed: 16px; }
   .shell {
     display: grid;
     grid-template-columns: 180px minmax(0, 1fr);
@@ -183,7 +185,11 @@ h2 { font: inherit; }
     align-items: flex-start;
     height: 100vh;
     height: 100svh;
-    padding: calc(var(--edge) - 6px) 0 var(--edge);  /* the name's capitals line up with the top of the cover */
+    padding: calc(var(--edge) - 6px) var(--bleed) var(--edge);  /* the name's capitals line up with the top of the cover */
+    margin-inline: calc(var(--bleed) * -1);  /* the padding is room for the bullet and focus rings only: the text stays put */
+    overflow-y: auto;  /* a low window or many rooms: this column scrolls, so its fine print is never cut off */
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
   }
   .mark, .lang { margin-right: 0; padding-block: 0; }
   .side nav, .lang { order: 0; }
@@ -192,7 +198,11 @@ h2 { font: inherit; }
   .rooms-side { display: block; }
   .rooms-side a { position: relative; display: block; padding-block: 3px; color: var(--ink-dim); }
   .rooms-side a:hover, .rooms-side a.is-here { color: var(--ink); }
-  .rooms-side a.is-here::before { content: "\2022"; position: absolute; left: -14px; }  /* hung outside the text */
+  .rooms-side a.is-here::before {  /* hung outside the text; the second declaration (alt text "") keeps it out of what a screen reader says */
+    content: "\2022"; content: "\2022" / "";
+    position: absolute;
+    left: -14px;
+  }
   .lang { margin-top: 28px; }
   .fine { display: block; margin-top: auto; font-size: 12px; color: var(--ink-dim); }
   .main { padding: var(--lead) 0 clamp(64px, 8vw, 104px); }
@@ -258,6 +268,9 @@ h2 { font: inherit; }
 @media (min-width: 960px) {
   .lb { row-gap: 14px; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
   .lb-link { padding-block: 3px; }  /* at least 24px tall to a pointer */
+}
+@media (pointer: coarse) {
+  .lb-link { min-height: 40px; }  /* a finger on a wide screen (a tablet) still gets 40px */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -413,13 +426,37 @@ __ROOMS__
     try { localStorage.setItem('nocturne.lang', lang.getAttribute('lang')); } catch (e) {}  // blocked: just not remembered
   });
 
-  /* ---------- phone room index: folds up on a pick, on Escape and on a tap outside it ---------- */
+  /* ---------- phone room index: folds up on a pick, on Escape, on a tap outside it and when focus leaves it ---------- */
   var menu = document.querySelector('.menu');
   var fold = function () { if (menu) menu.open = false; };
   if (menu) {
     all('a', menu).forEach(function (a) { a.addEventListener('click', fold); });
+
+    /* A press outside folds the menu and does nothing else: the click it ends in is stopped before it reaches the
+       link or photo under it. A press that turns into a scroll (pointercancel), or a key, leaves nothing to stop. */
+    var folding = false;
     document.addEventListener('pointerdown', function (e) {
-      if (menu.open && !menu.contains(e.target)) fold();
+      folding = menu.open && !menu.contains(e.target);
+      if (folding) fold();
+    });
+    document.addEventListener('pointercancel', function () { folding = false; });
+    document.addEventListener('keydown', function () { folding = false; });
+    document.addEventListener('click', function (e) {
+      if (!folding) return;
+      folding = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+
+    /* Focus leaving the menu (Tab or Shift+Tab out of it, a click that moves focus away) folds it. A press inside it
+       may take focus off the summary without leaving the menu (Safari does not focus what is pressed): not a leave. */
+    var pressing = false;
+    menu.addEventListener('pointerdown', function () { pressing = true; });
+    ['pointerup', 'pointercancel'].forEach(function (type) {
+      document.addEventListener(type, function () { pressing = false; });
+    });
+    menu.addEventListener('focusout', function (e) {
+      if (!pressing && menu.open && !menu.contains(e.relatedTarget)) fold();
     });
   }
 
@@ -458,7 +495,7 @@ __ROOMS__
     lbImg.alt = thumb.alt;
     setLang(lbImg, thumb.getAttribute('lang'));
     var full = new Image();
-    full.onload = function () { if (idx === want) lbImg.src = full.src; };
+    full.onload = function () { if (!lb.hidden && idx === want) lbImg.src = full.src; };  // not once the viewer is shut
     full.src = p.dataset.full;
     lbTitle.textContent = p.dataset.title;
     setLang(lbTitle, p.dataset.titleLang);
