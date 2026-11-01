@@ -32,6 +32,49 @@ class AdminStaticTests(unittest.TestCase):
     def test_site_link_opens_a_new_tab(self):
         t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
         self.assertIn('<a class="mark" href="../" target="_blank" rel="noopener">Nocturne</a>', t)
+    # --- the look: the site's black room and its one serif ---
+    SITE_PAGE = helpers.ROOT / "src" / "template.html"
+    ADMIN_CSS = helpers.ROOT / "admin" / "admin.css"
+    TOKENS = ("--ground", "--wall", "--ink", "--ink-dim", "--rule")
+
+    @staticmethod
+    def first_root(path):
+        """Body of the first `:root { }` block of a page or stylesheet (comments stripped)."""
+        css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        return re.search(r":root\s*\{([^}]*)\}", css).group(1)
+    def test_tokens_match_site(self):
+        site, admin = self.first_root(self.SITE_PAGE), self.first_root(self.ADMIN_CSS)
+        scheme = lambda body: re.search(r"color-scheme:\s*([^;]+);", body).group(1).strip()
+        self.assertEqual(scheme(admin), scheme(site))
+        site_tokens, admin_tokens = helpers.root_tokens(self.SITE_PAGE), helpers.root_tokens(self.ADMIN_CSS)
+        for name in self.TOKENS:
+            self.assertEqual(admin_tokens[name], site_tokens[name], name)
+        for name, value in admin_tokens.items():
+            if name not in self.TOKENS:
+                self.assertNotRegex(value, r"#[0-9a-fA-F]{3,8}\b|rgb|hsl", f"{name} is a colour the site does not have")
+    def test_no_colour_outside_the_tokens(self):
+        css = re.sub(r"/\*.*?\*/", "", self.ADMIN_CSS.read_text(encoding="utf-8"), flags=re.S)
+        css = css.replace(self.first_root(self.ADMIN_CSS), "")
+        css = re.sub(r"color-mix\([^;]*\)", "", css)  # tokens mixed with transparent
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(")
+    def test_one_font_no_ornament(self):
+        css = self.ADMIN_CSS.read_text(encoding="utf-8")
+        for gone in ("Cormorant", "IBM Plex", "--lamp", "--lb-", "prefers-color-scheme", "data-theme", "italic",
+                     "letter-spacing", "text-transform", "font-weight: 500", "animation", "@keyframes", "border-radius: 2px"):
+            self.assertNotIn(gone, css)
+        self.assertEqual(set(re.findall(r"font-size:\s*([^;]+);", css)) - {"12px", "13px", "14px", "16px"}, set())
+        self.assertEqual(set(re.findall(r"font-weight:\s*([^;]+);", css)) - {"400"}, set())
+    def test_font_link(self):
+        t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400&display=swap" crossorigin>', t)
+        self.assertNotIn("Cormorant", t)
+        self.assertNotIn("site-dot", t)  # the status is a line of text now
+    def test_no_room_numerals(self):
+        for p in js_files():
+            t = p.read_text(encoding="utf-8")
+            for gone in ("roman", "room-num", "room-en"):
+                self.assertNotIn(gone, t, f"{p.name}: {gone}")
+
     LABELS = ["새 사진", "전시 중", "GitHub로 로그인", "로그인하는 중…", "로그인을 취소했어요",
               "로그인하지 못했어요. 잠시 뒤 다시 해 주세요", "이 GitHub 계정으로는 관리할 수 없어요",
               "GitHub App이 nocturne 저장소에 설치되어 있지 않아요",

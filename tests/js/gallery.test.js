@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  SMALL_MODEL, CONFIDENT, GalleryError, serialize, allNames, addPhoto, deletePhoto, setCover, saveEdits, badges, roman,
+  SMALL_MODEL, CONFIDENT, GalleryError, serialize, allNames, addPhoto, deletePhoto, setCover, saveEdits, badges,
 } from '../../admin/lib/gallery.js';
 
 const ROOT = new URL('../../', import.meta.url); // repo root, whatever the working directory
@@ -262,8 +262,4 @@ test('badges edge cases', () => {
   assert.deepEqual(badges({ ai: { model: SMALL_MODEL, fields: [], confidence: 0.2 } }), ['확인 필요']);
   assert.deepEqual(badges({ ai: { model: SMALL_MODEL, fields: ['title'] } }), ['AI 설명 · 다듬기 대기']);
   assert.deepEqual(badges(site().rooms[0].photos[0]), []);
-});
-
-test('roman numbers rooms as the site does', () => {
-  assert.deepEqual([1, 2, 3, 4, 9, 14, 40, 1994].map(roman), ['I', 'II', 'III', 'IV', 'IX', 'XIV', 'XL', 'MCMXCIV']);
 });

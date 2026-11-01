@@ -46,23 +46,6 @@ export function serialize(data) {
   return `${dump(data, 0, [])}\n`;
 }
 
-// --- room numbers ----------------------------------------------------------------------------------------------
-
-const ROMAN = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
-  [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
-
-/** Room number as on the site: 1 -> I, 14 -> XIV (same table as scripts/build.py). */
-export function roman(n) {
-  let out = '';
-  for (const [value, letters] of ROMAN) {
-    while (n >= value) {
-      out += letters;
-      n -= value;
-    }
-  }
-  return out;
-}
-
 // --- finding things --------------------------------------------------------------------------------------------
 
 /** File names of every photo registered in a room. */

@@ -10,7 +10,7 @@
 // through textContent and value.
 
 import { AuthError, blobSha, GitHubError } from '../lib/github.js';
-import { addPhoto, allNames, GalleryError, roman, serialize } from '../lib/gallery.js';
+import { addPhoto, allNames, GalleryError, serialize } from '../lib/gallery.js';
 import { ImageError, processPhoto } from '../lib/image.js';
 import { nameFor, uniqueName } from '../lib/names.js';
 import { canDiscard, hint, label, newItem, toWaiting } from '../lib/queue.js';
@@ -963,8 +963,8 @@ function openForm(v, node, open) {
       return;
     }
     const keep = form.room.value;
-    form.room.replaceChildren(...rooms.map((room, i) => {
-      const option = el('option', '', `${roman(i + 1)} ${room.name}`);
+    form.room.replaceChildren(...rooms.map((room) => {
+      const option = el('option', '', room.name);
       option.value = room.id;
       return option;
     }));

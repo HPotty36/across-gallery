@@ -10,7 +10,7 @@
 // page through textContent and value.
 
 import { AuthError, GitHubError } from '../lib/github.js';
-import { badges, deletePhoto, GalleryError, roman, saveEdits, serialize, setCover } from '../lib/gallery.js';
+import { badges, deletePhoto, GalleryError, saveEdits, serialize, setCover } from '../lib/gallery.js';
 import { newItem } from '../lib/queue.js';
 
 const DATA = 'src/photos.json';
@@ -18,6 +18,7 @@ const REDRAFT = 'redraft-'; // queue/redraft-<file>/item.json asks the AI to wri
 const redraftPath = (file) => `queue/${REDRAFT}${file}/item.json`;
 const thumbSrc = (file) => `../photos/thumb/${encodeURIComponent(file)}.jpg`;
 const TEXTS = ['title', 'alt'];
+const STRONG = new Set(['대표 사진', '확인 필요']); // the badges that call for a look; the rest stay dim
 
 const LOADING = '불러오는 중…';
 const REDRAFTING = 'AI가 다시 쓰는 중…';
@@ -287,7 +288,7 @@ function place(parent, node, index) {
 function draw(v) {
   const { data } = v.store;
   const active = document.activeElement;
-  const roomOptions = data.rooms.map((room, i) => [room.id, `${roman(i + 1)} ${room.name}`]);
+  const roomOptions = data.rooms.map((room) => [room.id, room.name]);
   const optionsKey = JSON.stringify(roomOptions);
   const seenRooms = new Set();
   const seenRows = new Set();
@@ -295,9 +296,7 @@ function draw(v) {
 
   data.rooms.forEach((room, i) => {
     const section = v.rooms.get(room.id) ?? makeRoom(v, room.id);
-    section.num.textContent = roman(i + 1);
     section.name.textContent = room.name;
-    section.en.textContent = room.name_en ?? '';
     section.count.textContent = `${room.photos.length}점`;
     place(v.list, section.node, i);
     seenRooms.add(room.id);
@@ -331,18 +330,14 @@ function draw(v) {
 }
 
 function makeRoom(v, id) {
-  const num = el('span', 'room-num');
-  num.setAttribute('aria-hidden', 'true');
   const name = document.createTextNode('');
-  const en = el('span', 'room-en');
-  en.lang = 'en';
-  const heading = el('h2', '', name, ' ', en);
+  const heading = el('h2', '', name);
   heading.id = `ex-room-${id}`;
   const count = el('span', 'room-count');
   const list = el('ul', 'rows');
-  const node = el('section', 'room', el('div', 'room-head', num, heading, count), list);
+  const node = el('section', 'room', el('div', 'room-head', heading, ' ', count), list);
   node.setAttribute('aria-labelledby', heading.id);
-  const section = { id, node, num, name, en, count, list };
+  const section = { id, node, name, count, list };
   v.rooms.set(id, section);
   return section;
 }
@@ -379,8 +374,7 @@ function makeRow(v, file) {
   msg.setAttribute('role', 'status');
   msg.setAttribute('aria-live', 'polite');
   msg.tabIndex = -1;
-  const tags = el('ul', 'tags');
-  tags.setAttribute('aria-label', '표시');
+  const tags = el('p', 'tags');
 
   const group = el('div', 'row', figure, el('div', 'row-body', tags, fields, el('div', 'row-actions', save, redraft, cover, remove, coverNote), msg));
   group.setAttribute('role', 'group');
@@ -423,7 +417,10 @@ function fillRow(v, row, photo, roomId, roomOptions, optionsKey) {
 
   const tags = badges(photo);
   if (isCover) tags.unshift('대표 사진');
-  row.tags.replaceChildren(...tags.map((text) => el('li', text === '대표 사진' ? 'tag tag-cover' : 'tag', text)));
+  row.tags.replaceChildren(...tags.flatMap((text, i) => {
+    const node = STRONG.has(text) ? el('span', 'tag-strong', text) : text;
+    return i === 0 ? [node] : [' · ', node];
+  }));
   row.tags.hidden = tags.length === 0;
 
   const before = row.shown;
