@@ -38,6 +38,10 @@ CLAUDE_BUSY = "Claude API 요청이 너무 많아요"
 CLAUDE_OFFLINE = "Claude API에 연결하지 못했어요"
 CLAUDE_REFUSED = "Claude가 이 사진의 초안을 거절했어요"
 CLAUDE_CUT_OFF = "Claude의 답이 끊겼어요"
+# Anthropic's error type names: only one of these is put in a note, never whatever else an error body says
+CLAUDE_ERROR_TYPES = frozenset({"invalid_request_error", "authentication_error", "permission_error", "not_found_error",
+                                "request_too_large", "rate_limit_error", "api_error", "overloaded_error", "billing_error"})
+_REQUEST_ID = re.compile(r"req_[A-Za-z0-9]+")
 
 PROMPT_HEAD = "당신은 사진 전시 사이트의 큐레이터입니다. 이 사진을 아래 방 중 하나에 걸고, 한국어 제목과 대체 텍스트(alt)를 쓰세요."
 PROMPT_RULES = """규칙:
@@ -270,9 +274,24 @@ def _claude_client():
     return anthropic.Anthropic(timeout=CLAUDE_TIMEOUT, max_retries=CLAUDE_RETRIES)
 
 
+def _status_detail(err):
+    """"(<type>, <request id>)" for an API status error, either part left out when the error does not carry it (or
+    "" for neither): the error type only if it is one of CLAUDE_ERROR_TYPES, read from the error body when it is a
+    dict ({"error": {"type": ...}}) and else from err.type; the request id only if it looks like one (req_...)."""
+    body = getattr(err, "body", None)
+    kind = body.get("error") if isinstance(body, dict) else None
+    kind = kind.get("type") if isinstance(kind, dict) else getattr(err, "type", None)
+    request_id = getattr(err, "request_id", None)
+    parts = [kind if isinstance(kind, str) and kind in CLAUDE_ERROR_TYPES else None,
+             request_id if isinstance(request_id, str) and _REQUEST_ID.fullmatch(request_id) else None]
+    parts = [part for part in parts if part]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 def _claude_failure(err):
     """The CuratorError for an SDK exception, or None if `err` is not one. It is matched by shape (an int status_code,
-    or a class named like the SDK's connection errors) so tests need no SDK. The SDK's own text is not passed on."""
+    or a class named like the SDK's connection errors) so tests need no SDK. The SDK's own text is not passed on; an
+    other status error names only its error type and request id (see _status_detail)."""
     status = getattr(err, "status_code", None)
     if isinstance(status, int) and not isinstance(status, bool):
         if status == 401:
@@ -281,7 +300,7 @@ def _claude_failure(err):
             return CuratorError(CLAUDE_NO_ACCESS, retry=False)
         if status == 429:
             return CuratorError(CLAUDE_BUSY)
-        return CuratorError(f"Claude API 오류 {status}")
+        return CuratorError(f"Claude API 오류 {status}{_status_detail(err)}")
     if any(cls.__name__ in ("APIConnectionError", "APITimeoutError") for cls in type(err).__mro__):
         return CuratorError(CLAUDE_OFFLINE)
     return None

@@ -246,7 +246,8 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
   - `Claude API 키가 맞지 않아요`(또는 `Claude API 키가 없어요`): 비밀값 `ANTHROPIC_API_KEY`를 새 키로 바꾼다 (Claude API 키 넣기).
   - `Claude API 권한이나 크레딧을 확인해 주세요`: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지, claude.ai의 크레딧 연결이 풀리지 않았는지 본다.
   - `Claude API 요청이 너무 많아요`: 잠시 뒤 저절로 풀린다. 계속되면 Console의 한도를 본다.
-  - `Claude API 오류 <상태>`, `Claude API에 연결하지 못했어요`, `Claude의 답이 끊겼어요`, `Claude의 답을 읽을 수 없어요 (…)`: 대개 잠깐 문제다. 계속되면 Claude 단계 기록을 본다.
+  - `Claude API 오류 <상태>`, `Claude API에 연결하지 못했어요`, `Claude의 답이 끊겼어요`, `Claude의 답을 읽을 수 없어요 (…)`: 대개 잠깐 문제다. 계속되면 Claude 단계 기록을 본다. `Claude API 오류` 뒤의 괄호에는 알려진 오류 종류(`api_error` 등)와 요청 ID(`req_…`)가 있으면 붙는다.
+  - `Claude API 오류 400`이나 `404`가 계속되면: Console에서 크레딧이 남았는지, 월 한도에 걸리지 않았는지 보고, `draft.yml`의 `NOCTURNE_CLAUDE_MODEL`이 맞는 모델 이름인지 본다.
   - `Claude가 이 사진의 초안을 거절했어요`: e4b가 대신 썼으니 전시 중 탭에서 그 사진의 방·제목·설명을 확인한다.
   - `anthropic 패키지가 없어요`: `Claude SDK 설치` 단계가 실패했다. 그 단계 기록을 본다.
   - `AI 처리 중 문제가 생겼어요`: Claude 단계의 예상 못 한 오류다. 그 단계 기록의 traceback을 본다.

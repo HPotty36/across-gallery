@@ -286,11 +286,19 @@ class PromptReplyTests(unittest.TestCase):
 
 
 class APIStatusError(Exception):
-    """Same shape as anthropic.APIStatusError: an int status_code. The conversion is duck-typed, so no SDK is needed."""
+    """Same shape as anthropic.APIStatusError: an int status_code, the error body (a dict when it was JSON) and the
+    request id; `attrs` adds attributes such as `type`. The conversion is duck-typed, so no SDK is needed."""
 
-    def __init__(self, status_code):
-        super().__init__(f"HTTP {status_code}")
-        self.status_code = status_code
+    def __init__(self, status_code, *, body=None, request_id=None, **attrs):
+        super().__init__(f"HTTP {status_code}: secret details from the API")
+        self.status_code, self.body, self.request_id = status_code, body, request_id
+        for key, value in attrs.items():
+            setattr(self, key, value)
+
+
+def error_body(kind, message="secret details from the API"):
+    """An Anthropic API error body as the SDK parses it."""
+    return {"type": "error", "error": {"type": kind, "message": message}, "request_id": "req_inbody"}
 
 
 class APIConnectionError(Exception):
@@ -451,6 +459,36 @@ class ClaudeDraftTests(unittest.TestCase):
         for kwargs, message in cases:
             with self.subTest(message=message, **{k: type(v).__name__ for k, v in kwargs.items()}):
                 self.assertEqual(self.failure(**kwargs), message)
+
+    def test_status_error_detail(self):
+        # the error type (only a known Anthropic name) and the request id help to look the failure up; the API's own
+        # message never goes into the note
+        cases = [
+            (APIStatusError(500), "Claude API 오류 500"),
+            (APIStatusError(500, body=error_body("api_error"), request_id="req_011CAbc9"), "Claude API 오류 500 (api_error, req_011CAbc9)"),
+            (APIStatusError(400, body=error_body("invalid_request_error")), "Claude API 오류 400 (invalid_request_error)"),
+            (APIStatusError(404, request_id="req_abc123"), "Claude API 오류 404 (req_abc123)"),
+            (APIStatusError(529, type="overloaded_error"), "Claude API 오류 529 (overloaded_error)"),  # no body: the attribute
+            (APIStatusError(413, body="<html>too large</html>", type="request_too_large"), "Claude API 오류 413 (request_too_large)"),
+            (APIStatusError(400, body={"error": "flat"}, request_id="req_1"), "Claude API 오류 400 (req_1)"),
+            (APIStatusError(400, body={"type": "error"}), "Claude API 오류 400"),
+            (APIStatusError(400, body=error_body("Your credit balance is too low")), "Claude API 오류 400"),  # not a known type
+            (APIStatusError(400, body=error_body("billing_error"), request_id="not-a-request-id"), "Claude API 오류 400 (billing_error)"),
+            (APIStatusError(500, body=error_body(["api_error"])), "Claude API 오류 500"),
+        ]
+        for kind in ("invalid_request_error", "authentication_error", "permission_error", "not_found_error",
+                     "request_too_large", "rate_limit_error", "api_error", "overloaded_error", "billing_error"):
+            cases.append((APIStatusError(418, body=error_body(kind)), f"Claude API 오류 418 ({kind})"))
+        for bad in ("req_", "req_abc def", "req_abc\n", "REQ_abc", "req_abc-1", "xreq_abc", 12345, b"req_abc"):
+            cases.append((APIStatusError(500, request_id=bad), "Claude API 오류 500"))
+        for error, message in cases:
+            with self.subTest(status=error.status_code, body=error.body, request_id=error.request_id):
+                got = self.failure(error=error)
+                self.assertEqual(got, message)
+                self.assertNotIn("secret", got)
+        # the fixed messages stay as they are
+        self.assertEqual(self.failure(error=APIStatusError(401, body=error_body("authentication_error"), request_id="req_1")),
+                         "Claude API 키가 맞지 않아요")
 
     def test_unreadable_replies(self):
         unreadable = [
