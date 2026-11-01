@@ -145,7 +145,7 @@ input:hover, select:hover, textarea:hover { border-color: var(--ink-dim); }
   cursor: pointer;
 }
 .tab:hover, .tab[aria-selected="true"] { color: var(--ink); }
-.tab[aria-selected="true"]::before { content: "\2022"; position: absolute; left: -14px; }  /* hung outside the text, as in the site's room list */
+.tab[aria-selected="true"]::before { content: "\2022"; content: "\2022" / ""; position: absolute; left: -14px; }  /* hung outside the text, as in the site's room list */
 
 /* ---------- exhibit ---------- */
 .ex-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
@@ -251,6 +251,7 @@ input:hover, select:hover, textarea:hover { border-color: var(--ink-dim); }
 
 /* ---------- narrow screens: one column ---------- */
 @media (max-width: 600px) {
+  .tab[aria-selected="true"]::before { left: -11px; }  /* clear of the screen edge (and the back swipe) */
   .row { grid-template-columns: minmax(0, 1fr); }
   .row-thumb { max-width: 240px; }
   .row-fields { grid-template-columns: minmax(0, 1fr); }
