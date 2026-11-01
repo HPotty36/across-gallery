@@ -70,11 +70,14 @@ const listed = (item) => item.kind === 'new' || (item.kind === 'redraft' && item
  *   broken     a queue folder whose item.json is missing or unreadable (stage "queue", item null)
  *   thumb      the thumbnail Blob this page made, kept for the card after the commit (the large copy is not);
  *              other cards' thumbnails are read from queue/<name>/thumb.jpg
+ *   shareKey   the cache key of a photo shared to this page (lib/shared.js), until onShareDone has been told it is
+ *              no longer needed: its upload is in queue/ (or already published), or the failed card was thrown away
  */
 export class QueueStore {
   cards = new Map(); // key -> card, in the order they were first shown
   data = null; // src/photos.json as last read or committed
   onChange = () => {}; // called whenever an upload moves on
+  onShareDone = () => {}; // called with a card's shareKey once its photo is safe in queue/ or its failed upload was thrown away
   #folders = new Map(); // queue folder name -> {sha, item}: item.json is read again only when the sha changes
   #line = Promise.resolve();
   #uploads = Promise.resolve();
@@ -105,7 +108,7 @@ export class QueueStore {
 
   #add(fields) {
     const card = { key: `c${++this.#keys}`, stage: 'queue', name: null, file: null, fileName: null, copies: null, facts: null,
-      pending: null, error: null, final: false, mayHaveLanded: false, item: null, broken: false, thumb: null, ...fields };
+      pending: null, error: null, final: false, mayHaveLanded: false, item: null, broken: false, thumb: null, shareKey: null, ...fields };
     this.cards.set(card.key, card);
     return card;
   }
@@ -126,6 +129,19 @@ export class QueueStore {
   #landed(card, name, item) {
     Object.assign(card, { stage: 'queue', name, item, file: null, copies: null, facts: null, pending: null, error: null, final: false,
       mayHaveLanded: false });
+    this.#shareDone(card);
+  }
+
+  /** The photo behind a shared upload no longer depends on its cache entry (said once): tell onShareDone. */
+  #shareDone(card) {
+    const key = card.shareKey;
+    if (key === null) return;
+    card.shareKey = null;
+    try {
+      this.onShareDone(key);
+    } catch (error) {
+      console.error(error); // must not make a landed upload count as failed
+    }
   }
 
   /**
@@ -233,9 +249,14 @@ export class QueueStore {
 
   // --- uploading ---
 
-  /** Cards for these files show at once; the photos are then processed and sent one by one. Resolves when all are done. */
-  addFiles(files) {
-    const cards = [...files].map((file) => this.#add({ stage: 'upload', file, fileName: String(file.name ?? '') }));
+  /**
+   * Cards for these files show at once; the photos are then processed and sent one by one. Resolves when all are done.
+   * shareKeys (optional, one per file) are the cache keys of photos shared to this page: each is handed to onShareDone
+   * when that photo is in queue/ (or on show), or when its failed upload is thrown away (dropUpload). A photo whose
+   * upload fails, or that is not sent before the page goes away, keeps its key: it is offered again next time.
+   */
+  addFiles(files, shareKeys = []) {
+    const cards = [...files].map((file, i) => this.#add({ stage: 'upload', file, fileName: String(file.name ?? ''), shareKey: shareKeys[i] ?? null }));
     this.#changed();
     return this.#send(cards);
   }
@@ -251,8 +272,10 @@ export class QueueStore {
 
   /** Let go of a failed upload (and its copies); nothing was sent, so nothing is committed. */
   dropUpload(key) {
-    if (this.cards.get(key)?.stage !== 'upload-failed') return;
+    const card = this.cards.get(key);
+    if (card?.stage !== 'upload-failed') return;
     this.cards.delete(key);
+    this.#shareDone(card); // thrown away on purpose: the shared photo is not wanted either
     this.#changed();
   }
 
@@ -345,8 +368,12 @@ export class QueueStore {
             return { files: { [`${dir}/full.jpg`]: copies.full, [`${dir}/thumb.jpg`]: copies.thumb, [`${dir}/item.json`]: item } };
           },
         });
-        if (onShow) Object.assign(card, { stage: 'published', file: null, copies: null, pending: null, error: null, mayHaveLanded: false });
-        else this.#landed(card, name, item);
+        if (onShow) {
+          Object.assign(card, { stage: 'published', file: null, copies: null, pending: null, error: null, mayHaveLanded: false });
+          this.#shareDone(card);
+        } else {
+          this.#landed(card, name, item);
+        }
         return;
       } catch (error) {
         if (!(error instanceof NameTaken)) {
@@ -655,8 +682,10 @@ function build(root) {
 
   const v = { root, ctx: null, store: new QueueStore(null, null), list, status, retry, empty, loaded: false,
     nodes: new Map(), fading: new Set(), later: new Set(), timer: 0, polling: false, ids: 0,
-    pick, share, shareText, shareActions, shares: [], shareSeq: 0 };
+    pick, share, shareText, shareActions, shares: [], shareSeq: 0, taken: new Set() };
   v.store.onChange = () => draw(v);
+  // a shared photo is deleted from the cache only now: its upload is in queue/ (or the failed card was thrown away)
+  v.store.onShareDone = (key) => dropShares(cacheStorage(), [key]); // never rejects
 
   const take = (files) => {
     if (files.length && v === view) v.store.addFiles(files);
@@ -707,7 +736,7 @@ async function refreshShares(v) {
   const seq = ++v.shareSeq;
   const found = await pendingShares(cacheStorage()); // never rejects: [] when there is nothing, or no cache storage
   if (v !== view || seq !== v.shareSeq) return;
-  v.shares = found;
+  v.shares = found.filter((s) => !v.taken.has(s.key)); // not the ones this page is uploading (or just threw away)
   drawShares(v);
 }
 
@@ -718,9 +747,13 @@ function drawShares(v) {
   say(v.shareText, count > 0 ? `공유한 사진 ${count}장` : '');
 }
 
-/** The photos the line was offering, now handed over: the line goes at once (so nothing is taken twice). */
+/**
+ * The photos the line was offering, now handed over: the line goes at once (so nothing is taken twice), and this page
+ * remembers the keys so that no later look offers them again while it is busy with them.
+ */
 function takeShares(v) {
   const taken = v.shares;
+  for (const s of taken) v.taken.add(s.key);
   const hadFocus = v.share.contains(document.activeElement);
   v.shareSeq += 1; // a read in flight would bring them back
   v.shares = [];
@@ -729,16 +762,19 @@ function takeShares(v) {
   return taken;
 }
 
-/** 올리기: the photos go in as if they had been picked (cards at once), then leave the cache. */
-async function uploadShares(v) {
+/**
+ * 올리기: the photos go in as if they had been picked (cards at once). Each one leaves the cache only when its upload
+ * has landed in queue/ (store.onShareDone), not now: on a phone the installed app is one window, so a new share, or
+ * closing the app, can unload this page while photos are still being processed or committed, and an entry deleted
+ * early would be lost silently. A photo that is not in queue/ by then (or whose upload failed and stays on its
+ * 올리지 못했어요 card) is offered again the next time the page opens; 버리기 on that card deletes it. The Files are
+ * Blobs made from the cache entries, read one at a time as each photo's turn comes; they stay readable meanwhile
+ * (checked in Chrome with three 3.9 MB photos; other browsers were not tried).
+ */
+function uploadShares(v) {
   if (v !== view || v.shares.length === 0) return;
   const taken = takeShares(v);
-  // The cards are there now. The Files are Blobs made from the cache entries (the browser decides whether their bytes
-  // sit in memory or on disk): each one is read when its turn comes (photos go one at a time), possibly after the
-  // entries below are gone. A Blob keeps its bytes on its own, so that works: checked in Chrome with three 3.9 MB
-  // photos, all three reached queue/ although the cache was emptied right after 올리기. Other browsers were not tried.
-  v.store.addFiles(taken.map((s) => s.file));
-  await dropShares(cacheStorage(), taken.map((s) => s.key));
+  v.store.addFiles(taken.map((s) => s.file), taken.map((s) => s.key));
 }
 
 /** 버리기: gone from the cache; nothing was uploaded. */

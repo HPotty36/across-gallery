@@ -367,6 +367,118 @@ test('다시 올리기 after a failed commit moves to the next name when a diffe
   assert.deepEqual([card.name, card.stage], ['a-2', 'queue']);
 });
 
+// --- photos shared to the page: a share's cache entry goes only once its photo is in queue/ -------
+
+/** A store whose onShareDone hook (the view deletes the cache entry there) is recorded in `done`. */
+function sharingStore(fake, process) {
+  const store = makeStore(fake, process);
+  store.done = [];
+  store.onShareDone = (key) => store.done.push(key);
+  return store;
+}
+
+test('a shared photo\'s key is let go when its upload has landed in queue/, not before', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  await store.load();
+  const release = fake.holdCommit();
+  const upload = store.addFiles([{ name: 'a.jpg' }], ['share/1-0']);
+  while (fake.count('commitFiles') === 0) await tick();
+  assert.deepEqual(store.done, [], 'the commit is on its way: the photo is not in queue/ yet');
+  release();
+  await upload;
+  assert.equal(byName(store, 'a').stage, 'queue');
+  assert.deepEqual(store.done, ['share/1-0']);
+});
+
+test('a failed upload keeps its share key; 다시 올리기 landing it lets the key go, once', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  await store.load();
+  fake.failCommit(new GitHubError('GitHub 502: Injected failure (fail_next)', 502));
+  await store.addFiles([{ name: 'a.jpg' }, { name: 'b.jpg' }], ['share/1-0', 'share/1-1']);
+  assert.equal(byName(store, 'a').stage, 'upload-failed');
+  assert.deepEqual(store.done, ['share/1-1'], 'only the photo that landed');
+  await store.reupload(byName(store, 'a').key);
+  assert.deepEqual(store.done, ['share/1-1', 'share/1-0']);
+  await store.refresh();
+  assert.deepEqual(store.done, ['share/1-1', 'share/1-0'], 'never twice');
+});
+
+test('버리기 on a failed card lets its share key go (an unreadable photo too); on a card that landed nothing more happens', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  await store.load();
+  fake.failCommit(new GitHubError('GitHub 502: Injected failure (fail_next)', 502));
+  await store.addFiles([{ name: 'a.jpg' }, { name: 'bad.heic', bad: true }, { name: 'c.jpg' }], ['share/2-0', 'share/2-1', 'share/2-2']);
+  assert.deepEqual(store.done, ['share/2-2']);
+  store.dropUpload(byName(store, 'a').key);
+  assert.deepEqual(store.done, ['share/2-2', 'share/2-0']);
+  const bad = cards(store).find((c) => c.fileName === 'bad.heic');
+  store.dropUpload(bad.key);
+  assert.deepEqual(store.done, ['share/2-2', 'share/2-0', 'share/2-1']);
+  store.dropUpload(byName(store, 'c').key); // it is in queue/: dropUpload only concerns failed uploads
+  assert.equal(store.done.length, 3);
+});
+
+test('an upload that landed although its answer was lost lets its share key go when a look finds it', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  fake.failCommit(new GitHubError('인터넷 연결을 확인해 주세요', 0), { landed: true });
+  await store.addFiles([{ name: 'a.jpg' }], ['share/3-0']);
+  assert.equal(cards(store)[0].stage, 'upload-failed');
+  assert.deepEqual(store.done, [], 'the answer was lost: not known to have landed');
+  await store.refresh();
+  assert.equal(cards(store)[0].stage, 'queue');
+  assert.deepEqual(store.done, ['share/3-0']);
+});
+
+test('an upload the AI had published already when 다시 올리기 looked also lets its share key go', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  await store.load();
+  fake.failCommit(new GitHubError('인터넷 연결을 확인해 주세요', 0), { landed: true });
+  await store.addFiles([{ name: 'a.jpg' }], ['share/4-0']);
+  publishAsWorker(fake, 'a');
+  await store.reupload(cards(store)[0].key);
+  assert.equal(cards(store)[0].stage, 'published');
+  assert.deepEqual(store.done, ['share/4-0']);
+});
+
+test('close() in the middle of an upload keeps the keys of the photos not yet in queue/', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const process = fakeProcess();
+  const store = sharingStore(fake, process);
+  const done = store.addFiles([{ name: 'a.jpg' }, { name: 'b.jpg' }], ['share/5-0', 'share/5-1']);
+  while (process.events.length === 0) await tick();
+  store.close();
+  await done;
+  assert.deepEqual(store.done, []);
+});
+
+test('photos picked in the usual way have no share key: the hook is never called', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = sharingStore(fake);
+  fake.failCommit(new GitHubError('GitHub 502: Injected failure (fail_next)', 502));
+  await store.addFiles([{ name: 'a.jpg' }, { name: 'b.jpg' }]);
+  store.dropUpload(byName(store, 'a').key);
+  assert.deepEqual(store.done, []);
+});
+
+test('a hook that throws does not turn a landed upload into a failed one', async () => {
+  const fake = fakeGitHub({ [DATA]: site() });
+  const store = makeStore(fake);
+  store.onShareDone = () => { throw new Error('drawing problem'); };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    await store.addFiles([{ name: 'a.jpg' }], ['share/6-0']);
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(byName(store, 'a').stage, 'queue');
+});
+
 // --- the queue as shown ------------------------------------------------------------------------
 
 test('item.json is read again only for folders whose sha changed', async () => {
