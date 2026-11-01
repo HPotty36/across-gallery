@@ -29,10 +29,13 @@ scripts/
 .github/workflows/
   site.yml               Pages 빌드·배포
   draft.yml              PC가 못 맡은 사진을 GitHub에서 초안 쓰고 게시
+.github/assets/          README·소셜 미리보기 그림 (손으로 만든 것, 알아둘 것)
 tests/                   Python unittest, tests/js (node), fake_github.py(가짜 GitHub), browser/(브라우저 점검)
 docs/superpowers/        설계 문서(specs)와 구현 계획(plans)
 originals/               원본 사진. git에 올리지 않음 (.gitignore)
 index.html               로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
+README.md / README.ko.md 저장소 첫 화면 소개 (영어 기본 / 한국어, 내용 같음)
+LICENSE                  코드는 MIT. photos/·queue/의 사진은 MIT가 아님 (모든 권리 보유)
 ```
 
 ## 명령 (Windows, Python 3, Node 24)
@@ -253,5 +256,6 @@ PC 도우미는 따로 GitHub **fine-grained 토큰**을 쓴다.
 - API로 만드는 커밋(worker, PC 도우미, 관리 페이지)은 작성자를 `HPotty36 <112685098+HPotty36@users.noreply.github.com>`로 적는다 (`github_api.AUTHOR`, `admin/config.js`의 `COMMIT_AUTHOR`). 계정 프로필의 이름·이메일이 공개 기록에 들어가지 않게 하려는 것이니 지우지 말 것.
 - AI 제목은 40자, 설명은 200자에서 자른다 (낱말 경계에서). 흑백 표시는 자른 뒤에 붙는다.
 - 모델: PC `gemma4:12b-it-qat` (기본), Actions `gemma4:e4b-it-qat` (환경변수 `NOCTURNE_MODEL`). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.
+- README 그림(`.github/assets/`)은 자동으로 다시 만들지 않는다. 디자인이 바뀌면 손으로 다시 찍는다. 화면 그림은 공개 사이트를 headless Chrome(DevTools 프로토콜)으로 찍었다: 1440×900, 폰 390×844 2배, `prefers-color-scheme` 어둡게·밝게, JPEG 품질 82. 워드마크(Cormorant Garamond 이탤릭, 배경 투명)와 소셜 미리보기(1280×640, `photos/thumb/`의 사진 다섯 장)는 저장소 밖의 작은 HTML을 같은 방법으로 찍었다. 관리 페이지는 찍지 않는다. `social-preview.jpg`는 저장소 **Settings** → **Social preview**에 손으로 올린다.
 - 관리 페이지의 토큰은 로그인으로 받는 8시간짜리 `ghu_…` 토큰이고, 열린 페이지의 메모리에만 있다. localStorage·sessionStorage·쿠키·주소·기록 어디에도 쓰지 않는다. 브라우저에 남는 것은 localStorage `nocturne.signedIn`("이 기기에서 로그인한 적 있음", 비밀 아님)과, 로그인하러 다녀오는 동안의 sessionStorage `nocturne.login`(위조 방지 값과 PKCE 원문, 돌아오자마자 지움)·`nocturne.auto`(이 탭에서 저절로 로그인을 이미 해 봄)뿐이다. 옛 방식의 `nocturne.token`은 페이지를 열 때 지운다.
 - 관리 페이지는 `hpotty36.github.io` 출처에서 돈다. 이 계정의 모든 Pages 사이트가 같은 출처라서, 그중 어느 페이지에서 도는 스크립트든 혼자서 로그인을 끝낼 수 있다: 자기 PKCE 값으로 로그인 주소를 팝업으로 열고, 같은 출처인 팝업에서 `?code=`를 읽고, Worker에서 토큰으로 바꾼다 (Worker는 출처만 보니 통과한다). 그 기기 브라우저가 GitHub에 로그인돼 있고 App을 허용한 적이 있으면 아무것도 묻지 않는다. 토큰을 저장하지 않아도 이건 막지 못한다. 그래서 이 출처에는 믿을 수 있는 스크립트만 둔다 (지켜야 할 것). `nocturne.signedIn`도 그 사이트들이 볼 수 있다.
