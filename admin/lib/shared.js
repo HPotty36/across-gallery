@@ -1,6 +1,6 @@
 // Photos shared to the admin page from the phone's share sheet (admin/sw.js keeps them in the cache nocturne-share).
 // DOM-free: the page passes `caches` in, so Node can test it. Reading never removes anything: a photo leaves the
-// cache only when the person uploads or discards it (dropShares), so a share that waits through a failed or
+// cache only once its upload is in queue/ or the person discards it (dropShares), so a share that waits through a failed or
 // cancelled login is offered again after the next one.
 
 export const SHARE_CACHE = 'nocturne-share';
