@@ -24,7 +24,7 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # 쓰기 권한이 있는 토큰과 Anthropic 키는 worker 단계에만 준다 (내려받은 Ollama가 도는 단계에는 없다).
+    # 쓰기 권한이 있는 토큰은 worker 단계에, Anthropic 키는 Claude 단계에만 준다 (내려받은 Ollama가 도는 단계에는 둘 다 없다).
     # 여기에는 비밀이 아닌 모델 이름만 둔다. Claude 모델을 바꾸려면 아래 값만 고친다
     env:
       NOCTURNE_MODEL: gemma4:e4b-it-qat
@@ -38,7 +38,12 @@ jobs:
         with:
           python-version: "3.14"
 
-      - run: pip install -r requirements.txt -r requirements-ai.txt
+      - run: pip install -r requirements.txt
+
+      # 이 설치가 실패해도 e4b 단계는 돈다: Claude 단계는 anthropic을 못 불러와 사진을 e4b로 넘긴다
+      - name: Claude SDK 설치
+        continue-on-error: true
+        run: pip install -r requirements-ai.txt
 
       # 먼저 Claude가 맡는다. 키가 없으면 아무것도 맡지 않고 넘어간다 (키를 넣기 전에도 아래 e4b로 돈다).
       # Claude가 못 쓴 사진은 대기로 돌려놓아 아래 e4b 단계가 이어받는다.

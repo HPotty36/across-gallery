@@ -32,13 +32,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn("PC가 먼저 맡을 시간 주기", t)
     def test_draft_installs_requirements_before_worker(self):
         t = self.text(".github/workflows/draft.yml")
-        self.assertIn("pip install -r requirements.txt -r requirements-ai.txt", t)
-        self.assertLess(t.index("actions/setup-python@"), t.index("pip install -r requirements.txt -r requirements-ai.txt"))
-        self.assertLess(t.index("pip install -r requirements.txt -r requirements-ai.txt"), t.index("worker.py"))
+        # the site's own requirements install must not depend on the Claude SDK: a failed SDK install only leaves
+        # the Claude pass to hand its photos to e4b (the worker reads the missing package as a Claude failure)
+        base_install = "      - run: pip install -r requirements.txt\n"
+        self.assertIn(base_install, t)
+        sdk = self.step(t, "Claude SDK 설치")
+        self.assertIn("continue-on-error: true", sdk)
+        self.assertIn("run: pip install -r requirements-ai.txt", sdk)
+        base, sdk_at = t.index(base_install), t.index("- name: Claude SDK 설치")
+        self.assertLess(t.index("actions/setup-python@"), base)
+        self.assertLess(base, sdk_at)
+        self.assertLess(sdk_at, t.index("- name: Claude로 초안 쓰고 게시"))
+        self.assertLess(sdk_at, t.index("worker.py"))
     def test_draft_steps_run_claude_first_then_ollama_for_what_is_left(self):
         t = self.text(".github/workflows/draft.yml")
         self.assertEqual(re.findall(r"^      - name: (.+)$", t, re.M),
-                         ["Claude로 초안 쓰고 게시", "남은 사진 찾기", "Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기",
+                         ["Claude SDK 설치", "Claude로 초안 쓰고 게시", "남은 사진 찾기", "Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기",
                           "Ollama 서버 켜기", "모델 내려받기", "모델 폴더 캐시 저장", "e4b로 초안 쓰고 게시",
                           "사이트 다시 만들기"])
         claude = self.step(t, "Claude로 초안 쓰고 게시")
@@ -110,6 +119,9 @@ class WorkflowTests(unittest.TestCase):
         t = self.text(".github/workflows/draft.yml")
         job_env = t[t.index("runs-on:"):t.index("    steps:")]
         self.assertNotIn("ANTHROPIC", job_env)
+        # nothing before the Claude step names the key: not the triggers, the job env, nor the unnamed or SDK steps
+        self.assertNotIn("ANTHROPIC", t[:t.index("- name: Claude로 초안 쓰고 게시")])
+        self.assertLess(t.index("jobs:"), t.index("- name: Claude로 초안 쓰고 게시"))
         self.assertEqual(t.count("secrets."), 1)
         self.assertEqual(t.count("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"), 1)
         self.assertIn("env:\n          GITHUB_TOKEN: ${{ github.token }}\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}",
