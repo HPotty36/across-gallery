@@ -35,7 +35,8 @@ docs/superpowers/        설계 문서(specs)와 구현 계획(plans)
 originals/               원본 사진. git에 올리지 않음 (.gitignore)
 index.html               로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
 README.md / README.ko.md 저장소 첫 화면 소개 (영어 기본 / 한국어, 내용 같음)
-LICENSE                  코드는 MIT. photos/·queue/의 사진은 MIT가 아님 (모든 권리 보유)
+LICENSE                  코드는 MIT (GitHub가 MIT로 알아보게 표준 문구만 둔다)
+NOTICE.md                photos/·queue/의 사진은 MIT가 아님 (모든 권리 보유)
 ```
 
 ## 명령 (Windows, Python 3, Node 24)

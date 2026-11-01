@@ -121,5 +121,5 @@ The full project notes (structure, upload flow, login setup, design tokens) are 
 
 The code is released under the [MIT License](LICENSE).
 
-The photographs in `photos/` (and anything under `queue/`) are © HPotty36, all rights reserved. They are not covered
+The photographs in `photos/` (and anything under `queue/`) are © HPotty36, all rights reserved ([NOTICE](NOTICE.md)). They are not covered
 by the MIT License.

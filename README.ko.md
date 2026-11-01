@@ -121,5 +121,5 @@ docs/         설계 문서와 구현 계획
 
 코드는 [MIT 라이선스](LICENSE)로 공개합니다.
 
-`photos/`의 사진(과 `queue/`에 올라온 사진)은 © HPotty36, 모든 권리를 보유합니다. MIT 라이선스에 포함되지
+`photos/`의 사진(과 `queue/`에 올라온 사진)은 © HPotty36, 모든 권리를 보유합니다([NOTICE](NOTICE.md)). MIT 라이선스에 포함되지
 않습니다.
