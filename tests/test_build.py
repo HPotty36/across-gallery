@@ -41,7 +41,7 @@ class BuildTests(unittest.TestCase):
         html = self.en()
         for s in ('<html lang="en">', '<li><a href="#river">River</a></li>', '<h2>Night</h2><span class="room-count">1</span>',
                   '<summary>Index</summary>', '<nav aria-label="Rooms">', 'aria-label="Photo viewer"', '>Previous<', '>Next<', '>Close<',
-                  '<a class="lang" href="../" lang="ko" hreflang="ko">한국어</a>', '3 photographs<br>',
+                  '<a class="lang" href="../?lang=ko" lang="ko" hreflang="ko">한국어</a>', '3 photographs<br>',
                   '<a class="foot-admin" href="../admin/">Admin</a>', '<meta name="description" content="3 photographs">'):
             self.assertIn(s, html)
         self.assertIn('aria-label="View Payphone"', html)
@@ -62,9 +62,11 @@ class BuildTests(unittest.TestCase):
         for page, links in ((ko, ("./", "en/", "./")), (en, ("../", "./", "../"))):
             for lang, href in zip(("ko", "en", "x-default"), links):
                 self.assertIn(f'<link rel="alternate" hreflang="{lang}" href="{href}">', page)
-        self.assertIn("localStorage.getItem('nocturne.lang')", ko)
-        self.assertIn("location.replace('en/'+location.hash)", ko)
+        redirect = (helpers.ROOT / "src" / "redirect.js").read_text(encoding="utf-8").strip()
+        self.assertIn(f"<script>{redirect}</script>", ko)  # src/redirect.js itself, inlined
+        self.assertLess(ko.index(redirect), ko.index("<title>"))
         self.assertNotIn("location.replace", en)
+        self.assertNotIn("getItem('nocturne.lang')", en)
 
     def test_total_text(self):
         self.assertEqual([build.total_text("ko", 3), build.total_text("en", 3), build.total_text("en", 1)],
@@ -190,7 +192,7 @@ class PwaTests(unittest.TestCase):
 
     def test_sw(self):
         text = self.built("sw.js")
-        for placeholder in ("__VERSION__", "__PHOTOS__"):
+        for placeholder in ("__VERSION__", "__PHOTOS__", "__COVER__"):
             self.assertNotIn(placeholder, text)
         photos = json.loads(re.search(r"const PHOTOS = (\[.*?\]);", text, re.S).group(1))
         self.assertEqual(photos, [{"thumb": build.asset_url(self.root, "thumb", f), "full": build.asset_url(self.root, "full", f)}
@@ -212,6 +214,15 @@ class PwaTests(unittest.TestCase):
             sw.write_text(broken, encoding="utf-8")
             with self.assertRaisesRegex(build.BuildError, "src/sw.js"):
                 build.build(self.root)
+
+    def test_shell_files_are_published(self):
+        # install fetches every path of SHELL: one missing from the published folder would fail every install
+        shell = re.search(r"const SHELL = \[(.*?)\];", self.built("sw.js"), re.S).group(1)
+        paths = re.findall(r"'([^']+)'", shell)
+        self.assertIn("manifest.webmanifest", paths)
+        self.assertGreater(len(paths), 1)
+        for path in paths:
+            self.assertTrue((self.out / path).is_file(), path)
 
     def test_root_build_writes_pwa_files(self):
         build.build(self.root)

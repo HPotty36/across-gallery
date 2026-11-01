@@ -167,7 +167,7 @@
 - 방 기간 계산은 함수 하나(`room_span(photos) -> str`)로 둔다.
 - 같은 폴더(루트 빌드면 저장소 루트, `--out`이면 그 폴더)에 `index.html`과 함께 다음을 쓴다.
   - `manifest.webmanifest`(3절)
-  - `sw.js`: `src/sw.js`에서 `__VERSION__`과 `__PHOTOS__`를 채운 것
+  - `sw.js`: `src/sw.js`에서 `__VERSION__`, `__PHOTOS__`, `__COVER__`를 채운 것(각각 꼭 한 번 있어야 하고, 아니면 빌드가 멈춘다)
 - `--out`일 때 `photos/`, `admin/`과 함께 `icons/`도 복사한다.
 - 저장소 루트에 생기는 `sw.js`와 `manifest.webmanifest`는 `index.html`처럼 `.gitignore`에 넣는다(루트만).
 - `site.yml`의 `paths`에 `icons/**`를 더한다. `src/**`는 이미 들어 있다.
@@ -207,13 +207,14 @@
 
 - `VERSION`: 두 페이지(`index.html`, `en/index.html`)와 `manifest.webmanifest`와 `src/sw.js` 틀 내용의 해시(앞 12자리). 사이트가 바뀔 때마다 `sw.js`가 달라져 브라우저가 새 서비스 워커를 받는다.
 - `PHOTOS`: 지금 전시 중인 사진마다 `{thumb, full}` 주소(해시 붙은, scope 기준 상대 주소).
+- `COVER`: 대표 사진의 `full` 주소(`const COVER = '' /*__COVER__*/;` 한 줄을 빌드가 채운다). 대표 사진이 없거나 걸려 있지 않으면 빈 문자열이다. 대표 사진의 `<img>`는 서비스 워커가 페이지를 맡기 전에 전체 크기 사진을 받으므로, 설치 때 워커가 직접 한 번 담아 두어야 오프라인에서 첫 화면이 비지 않는다.
 - 캐시 넷:
 
 | 캐시 | 담는 것 | 언제 넣나 |
 |---|---|---|
 | `nocturne-page` | `./`, `en/`, `manifest.webmanifest`, `icons/` 네 개 | 설치(install) 때 모두 새로. 페이지는 온라인으로 받을 때마다 갱신 |
 | `nocturne-thumbs` | `PHOTOS`의 thumb 전부 | 설치 때 **아직 없는 것만** 받는다(새 사진만 받음) |
-| `nocturne-full` | 크게 본 원본 | 처음 받을 때 |
+| `nocturne-full` | 대표 사진(`COVER`)과 크게 본 원본 | 대표 사진은 설치 때 **아직 없으면** 받는다(실패해도 설치는 실패하지 않음). 나머지는 처음 받을 때 |
 | `nocturne-fonts` | `fonts.googleapis.com` 스타일시트, `fonts.gstatic.com` 글꼴 | 처음 받을 때 |
 
 - 설치 때 `skipWaiting()`, 활성(activate) 때 `clients.claim()`을 부른다. 활성 때는 다음을 정리한다.
@@ -261,10 +262,10 @@
 - 날짜와 기간 표기는 두 언어가 같다.
 
 ### 토글과 언어 기억
-- 한국어 페이지에는 "English"(주소 `en/`), 영어 페이지에는 "한국어"(주소 `../`) 글자 링크를 둔다. 링크에는 그 언어의 `lang`과 `hreflang`을 붙인다.
+- 한국어 페이지에는 "English"(주소 `en/`), 영어 페이지에는 "한국어"(주소 `../?lang=ko`) 글자 링크를 둔다. 링크에는 그 언어의 `lang`과 `hreflang`을 붙인다. 한국어 링크가 `?lang=ko`를 달고 가는 까닭은 아래 첫 방문 규칙이 한국어를 고른 사람을 영어로 되돌려 보내지 않게 하려는 것이다(저장소가 막힌 브라우저에서도).
 - 넓은 화면에서는 왼쪽 열의 방 목록 아래(28px 띄움)에, 폰에서는 위 줄의 "목록" 왼쪽에 둔다. 색은 `--ink-dim`, 마우스를 올리면 `--ink`.
 - 토글을 누르면 `localStorage`의 `nocturne.lang`에 `ko` 또는 `en`을 적는다(읽기·쓰기는 `try`로 감싼다. 막혀 있으면 기억하지 않을 뿐이다).
-- **한국어 페이지(사이트 루트)에만** `<head>` 맨 앞에 작은 스크립트를 둔다. 기억한 언어가 `en`이면, 또는 기억한 언어가 없고 브라우저 언어(`navigator.languages`의 첫 값, 없으면 `navigator.language`)가 `ko`로 시작하지 않으면, 화면을 그리기 전에 `location.replace('en/' + location.hash)`로 간다. 영어 페이지는 아무 데로도 보내지 않는다(영어 주소를 받은 사람은 늘 영어를 본다).
+- **한국어 페이지(사이트 루트)에만** `<head>` 맨 앞에 작은 스크립트를 둔다. 스크립트는 `src/redirect.js`(일반 ES5 스크립트)이고, 빌드가 그 내용을 `<script>…</script>`로 인라인한다. 주소의 쿼리에 `lang=ko`가 하나의 매개변수로 들어 있으면(`/[?&]lang=ko(&|$)/`) 아무것도 하지 않는다(토글로 한국어를 막 고른 사람). 아니면, 기억한 언어가 `en`이면, 또는 기억한 언어가 없고 브라우저 언어(`navigator.languages`의 첫 값, 없으면 `navigator.language`)가 `ko`로 시작하지 않으면, 화면을 그리기 전에 `location.replace('en/' + location.hash)`로 간다. 저장소를 읽다 오류가 나면 기억한 언어가 없는 것으로 본다. 영어 페이지는 아무 데로도 보내지 않는다(영어 주소를 받은 사람은 늘 영어를 본다).
 - 설치한 앱은 루트(`./`)로 열리므로 같은 규칙으로 기억한 언어가 열린다.
 
 ## 5. AI가 영어도 쓴다

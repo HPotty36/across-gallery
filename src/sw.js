@@ -1,18 +1,21 @@
 /* Nocturne's service worker: keeps the exhibition on the device, so an installed site opens without a network.
 
-   This file is a template. scripts/build.py writes sw.js next to index.html with the two constants below filled
+   This file is a template. scripts/build.py writes sw.js next to index.html with the three constants below filled
    in: VERSION (a hash of both pages, the manifest and this file, so any change to the site gives the browser a
-   new worker) and PHOTOS (the hashed thumb and full URLs of every photo on show, relative to the scope).
-   Unfilled, the file is still valid JavaScript: the node tests (tests/js/sw.test.js) run it in node:vm and call
-   the three decisions below, and it only listens for events when it runs as a service worker.
+   new worker), PHOTOS (the hashed thumb and full URLs of every photo on show, relative to the scope) and COVER
+   (the full-size URL of the cover, or empty). Unfilled, the file is still valid JavaScript: the node tests
+   (tests/js/sw.test.js) run it in node:vm and call the three decisions below, and it only listens for events
+   when it runs as a service worker.
 
    Caches: nocturne-page (both pages, the manifest, the icons), nocturne-thumbs (every thumbnail on show),
-   nocturne-full (full-size copies once viewed), nocturne-fonts (the Google Fonts stylesheet and font files).
+   nocturne-full (the cover, then full-size copies once viewed), nocturne-fonts (the Google Fonts stylesheet and
+   font files).
    admin/ is never answered here: the admin page, its GitHub login return and its API calls go to the network
    exactly as if there were no service worker. */
 
 const VERSION = '__VERSION__';
 const PHOTOS = [/*__PHOTOS__*/];
+const COVER = '' /*__COVER__*/;
 
 const PAGE = 'nocturne-page';
 const THUMBS = 'nocturne-thumbs';
@@ -85,18 +88,19 @@ if (typeof ServiceWorkerGlobalScope !== 'undefined') {
       // the pages and the shell are taken fresh each time (revalidated, not straight from the HTTP cache)
       const pages = await caches.open(PAGE);
       await pages.addAll(['./', 'en/', ...SHELL].map((path) => new Request(at(path), { cache: 'no-cache' })));
-      // thumbnails: only the ones not here yet, each on its own; one that cannot be had waits for the page to ask
-      const thumbs = await caches.open(THUMBS);
-      await Promise.all(PHOTOS.map(async (p) => {
-        const url = at(p.thumb);
+      // thumbnails, and the cover (a full-size copy that the first page loads before this worker controls it): only
+      // the ones not here yet, each on its own; one that cannot be had waits for the page to ask
+      const [thumbs, full] = await Promise.all([caches.open(THUMBS), caches.open(FULL)]);
+      const keep = async (cache, url) => {
         try {
-          if (await thumbs.match(url)) return;
+          if (await cache.match(url)) return;
           const res = await fetch(url);
-          if (storable(res)) await thumbs.put(url, res);
+          if (storable(res)) await cache.put(url, res);
         } catch (e) {
           // offline or gone: not a reason to keep the old worker
         }
-      }));
+      };
+      await Promise.all([...PHOTOS.map((p) => keep(thumbs, at(p.thumb))), ...(COVER ? [keep(full, at(COVER))] : [])]);
       await self.skipWaiting();
     })());
   });

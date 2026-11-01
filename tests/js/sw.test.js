@@ -12,6 +12,7 @@ const S = 'https://hpotty36.github.io/nocturne/';
 test('route', () => {
   const cases = [
     [S, 'navigate', 'page'], [S + 'index.html', 'navigate', 'page'], [S + '#river', 'navigate', 'page'],
+    [S + '?lang=ko', 'navigate', 'page'],  // the English page's link to the Korean one
     [S + 'en/', 'navigate', 'page'], [S + 'en/index.html', 'navigate', 'page'], [S + 'en', 'navigate', 'pass'],
     [S, 'cors', 'pass'],
     [S + 'admin', 'navigate', 'pass'], [S + 'admin/', 'navigate', 'pass'],
@@ -38,4 +39,76 @@ test('storable', () => {
   assert.equal(ctx.storable({ ok: true, type: 'cors' }), true);
   for (const r of [{ ok: false, type: 'basic' }, { ok: true, type: 'opaque' }, { ok: true, type: 'opaqueredirect' }])
     assert.equal(ctx.storable(r), false, JSON.stringify(r));
+});
+
+// The install step, run as a service worker would run it: the template with its constants filled in, in a context
+// with stand-ins for the worker scope, the caches and the network.
+const template = readFileSync(new URL('../../src/sw.js', import.meta.url), 'utf8');
+const PHOTOS = [{ thumb: 'photos/thumb/a1.jpg?v=aaaaaaaa', full: 'photos/full/a1.jpg?v=bbbbbbbb' },
+                { thumb: 'photos/thumb/n1.jpg?v=cccccccc', full: 'photos/full/n1.jpg?v=dddddddd' }];
+
+async function install({ cover, cached = {}, network = () => ({ ok: true, type: 'basic' }) }) {
+  const stores = new Map(Object.entries(cached).map(([name, urls]) => [name, new Map(urls.map((u) => [u, { ok: true, old: true }]))]));
+  const fetched = [];
+  const listeners = {};
+  let skipped = false;
+  const keyOf = (key) => (typeof key === 'string' ? key : key.url);
+  const caches = {
+    async open(name) {
+      if (!stores.has(name)) stores.set(name, new Map());
+      const store = stores.get(name);
+      return {
+        match: async (key) => store.get(keyOf(key)),
+        put: async (key, res) => { store.set(keyOf(key), res); },
+        addAll: async (requests) => { for (const r of requests) store.set(r.url, { ok: true }); },
+        keys: async () => [...store.keys()].map((url) => ({ url })),
+        delete: async (key) => store.delete(keyOf(key)),
+      };
+    },
+    keys: async () => [...stores.keys()],
+  };
+  const source = template.replace("'__VERSION__'", "'test'").replace('[/*__PHOTOS__*/]', JSON.stringify(PHOTOS))
+    .replace("'' /*__COVER__*/", JSON.stringify(cover));
+  const ctx = vm.createContext({
+    URL, Promise, caches, ServiceWorkerGlobalScope: class {},
+    Request: class { constructor(url) { this.url = url; } },
+    fetch: async (url) => { fetched.push(url); return network(url); },
+    self: { registration: { scope: S }, addEventListener: (type, fn) => { listeners[type] = fn; },
+            skipWaiting: async () => { skipped = true; }, clients: { claim: async () => {} } },
+  });
+  vm.runInContext(source, ctx);
+  let done;
+  listeners.install({ waitUntil: (p) => { done = p; } });
+  await done;
+  const urls = (name) => [...(stores.get(name) || new Map()).keys()];
+  return { fetched, skipped, thumbs: urls('nocturne-thumbs'), full: urls('nocturne-full'), stores };
+}
+
+test('install keeps every thumbnail and the cover, so the first page shows offline', async () => {
+  const r = await install({ cover: PHOTOS[0].full });
+  assert.deepEqual(r.thumbs, PHOTOS.map((p) => S + p.thumb));
+  assert.deepEqual(r.full, [S + PHOTOS[0].full]);  // the cover only, not every full-size copy
+  assert.deepEqual(r.fetched, [S + PHOTOS[0].thumb, S + PHOTOS[1].thumb, S + PHOTOS[0].full]);
+  assert.equal(r.skipped, true);
+});
+
+test('install does not fetch what is already kept, and takes no cover when there is none', async () => {
+  const again = await install({ cover: PHOTOS[0].full, cached: { 'nocturne-thumbs': PHOTOS.map((p) => S + p.thumb), 'nocturne-full': [S + PHOTOS[0].full] } });
+  assert.deepEqual(again.fetched, []);
+  assert.equal(again.stores.get('nocturne-full').get(S + PHOTOS[0].full).old, true);  // the kept copy is left as it is
+  const none = await install({ cover: '' });
+  assert.deepEqual(none.full, []);
+  assert.deepEqual(none.fetched, PHOTOS.map((p) => S + p.thumb));
+});
+
+test('a cover that cannot be had never fails the install', async () => {
+  const coverUrl = S + PHOTOS[0].full;
+  for (const network of [(url) => { if (url === coverUrl) throw new Error('offline'); return { ok: true, type: 'basic' }; },
+                         (url) => (url === coverUrl ? { ok: false, type: 'basic' } : { ok: true, type: 'basic' }),
+                         (url) => (url === coverUrl ? { ok: true, type: 'opaque' } : { ok: true, type: 'basic' })]) {
+    const r = await install({ cover: PHOTOS[0].full, network });
+    assert.deepEqual(r.full, []);  // nothing wrong is kept ...
+    assert.deepEqual(r.thumbs, PHOTOS.map((p) => S + p.thumb));  // ... and the rest went on
+    assert.equal(r.skipped, true);
+  }
 });

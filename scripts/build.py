@@ -3,9 +3,9 @@
 Usage:  python scripts/build.py [--out DIR]      (Windows: py scripts\\build.py)
 
 Next to the pages it writes manifest.webmanifest (for installing the site) and sw.js (src/sw.js with its
-version and photo list filled in). Without --out all of these go to the project root. With --out they go
-to DIR and photos/, icons/ (and admin/, if present) are copied next to them, which is the folder GitHub
-Pages publishes.
+version, photo list and cover filled in). The Korean page carries src/redirect.js inline. Without --out all of
+these go to the project root. With --out they go to DIR and photos/, icons/ (and admin/, if present) are copied
+next to them, which is the folder GitHub Pages publishes.
 
 Reads each photo's size and average colour from photos/full and photos/thumb,
 so run scripts/prepare_photos.py first for any new photo.
@@ -36,8 +36,8 @@ MANIFEST = {
               {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
 }
 
-# The two lines of src/sw.js the build fills in; each must be there exactly once.
-SW_VERSION, SW_PHOTOS = "'__VERSION__'", "[/*__PHOTOS__*/]"
+# The three places in src/sw.js the build fills in; each must be there exactly once.
+SW_VERSION, SW_PHOTOS, SW_COVER = "'__VERSION__'", "[/*__PHOTOS__*/]", "'' /*__COVER__*/"
 
 # Screen text per language. `view` and `count` are templates: {title}, {n}.
 STRINGS = {
@@ -48,15 +48,12 @@ STRINGS = {
 }
 
 # Per page: where it is written, the prefix its asset and admin links need, the language toggle, and the
-# hrefs of its <link rel="alternate"> lines (ko, en, x-default).
+# hrefs of its <link rel="alternate"> lines (ko, en, x-default). The English page's toggle carries ?lang=ko, so
+# the Korean page's first-visit rule (src/redirect.js) never sends someone who just chose Korean back to English.
 PAGES = {
     "ko": {"file": "index.html", "base": "", "switch_href": "en/", "switch_lang": "en", "alternates": ("./", "en/", "./")},
-    "en": {"file": "en/index.html", "base": "../", "switch_href": "../", "switch_lang": "ko", "alternates": ("../", "./", "../")},
+    "en": {"file": "en/index.html", "base": "../", "switch_href": "../?lang=ko", "switch_lang": "ko", "alternates": ("../", "./", "../")},
 }
-
-# Only the Korean page (the site root, which an installed app opens) sends a visitor to the English page:
-# when English was chosen before, or when nothing was chosen and the browser is not set to Korean.
-REDIRECT = "<script>(function(){var s;try{s=localStorage.getItem('nocturne.lang')}catch(e){}var l=(navigator.languages&&navigator.languages[0])||navigator.language||'';if(s==='en'||(!s&&!/^ko/i.test(l)))location.replace('en/'+location.hash)})()</script>"
 
 COPY_PATHS = {"thumb": photolib.thumb_path, "full": photolib.full_path}
 
@@ -182,8 +179,13 @@ def room_html(room, facts, lang, base, first):
             f'<span class="room-count">{esc(count)}</span>{span_html}</header><div class="hang">{prints}\n</div></section>')
 
 
-def render_page(template, data, facts, lang):
-    """The template filled for one language. Everything from photos.json is escaped on the way in."""
+def render_page(template, data, facts, lang, redirect):
+    """The template filled for one language. Everything from photos.json is escaped on the way in.
+
+    redirect is the text of src/redirect.js. Only the Korean page (the site root, which an installed app opens) carries
+    it, inline: it sends a visitor to the English page when English was chosen before, or when nothing was chosen and
+    the browser is not set to Korean.
+    """
     site, rooms = data["site"], data["rooms"]
     page, strings = PAGES[lang], STRINGS[lang]
     base, total = page["base"], sum(len(r["photos"]) for r in rooms)
@@ -196,7 +198,7 @@ def render_page(template, data, facts, lang):
     description = site["description_en"] if lang == "en" and site.get("description_en") else site["description"]
     values = {
         "__LANG__": lang,
-        "__REDIRECT__": REDIRECT if lang == "ko" else "",
+        "__REDIRECT__": f"<script>{redirect}</script>" if lang == "ko" else "",
         "__DESCRIPTION__": esc(description.format(total=total)),
         "__TITLE__": esc(site["title"]),
         "__ALTERNATES__": "\n".join(f'<link rel="alternate" hreflang="{code}" href="{href}">'
@@ -227,20 +229,22 @@ def manifest_text(description):
     return json.dumps({**MANIFEST, "description": description}, ensure_ascii=False, indent=2) + "\n"
 
 
-def sw_text(template, pages, manifest, photos):
-    """sw.js: the src/sw.js template with VERSION and PHOTOS filled in.
+def sw_text(template, pages, manifest, photos, cover):
+    """sw.js: the src/sw.js template with VERSION, PHOTOS and COVER filled in.
 
     VERSION is the first 12 hex of a sha256 over the Korean page, the English page, the manifest and the template,
     so the browser takes a new service worker whenever anything on the site changes (and only then). PHOTOS is the
-    {thumb, full} URLs of every photo on show, in page order.
+    {thumb, full} URLs of every photo on show, in page order. COVER is the full-size URL of the cover ("" when none
+    is hung): the cover page loads it before the worker controls the page, so the worker fetches it itself.
     """
-    for mark in (SW_VERSION, SW_PHOTOS):
+    for mark in (SW_VERSION, SW_PHOTOS, SW_COVER):
         if template.count(mark) != 1:
             raise BuildError(f"src/sw.js 에 {mark} 가 꼭 한 번 있어야 합니다.")
     digest = hashlib.sha256()
     for text in (pages["ko"], pages["en"], manifest, template):
         digest.update(text.encode("utf-8"))
-    return template.replace(SW_VERSION, f"'{digest.hexdigest()[:12]}'").replace(SW_PHOTOS, json.dumps(photos))
+    return (template.replace(SW_VERSION, f"'{digest.hexdigest()[:12]}'").replace(SW_PHOTOS, json.dumps(photos))
+            .replace(SW_COVER, json.dumps(cover)))
 
 
 def build(root, out=None):
@@ -263,10 +267,12 @@ def build(root, out=None):
                            "thumb": asset_url(root, "thumb", name), "full": asset_url(root, "full", name)}
 
     template = (root / "src" / "template.html").read_text(encoding="utf-8")
-    pages = {lang: render_page(template, data, facts, lang) for lang in PAGES}
+    redirect = (root / "src" / "redirect.js").read_text(encoding="utf-8").strip()
+    pages = {lang: render_page(template, data, facts, lang, redirect) for lang in PAGES}
     manifest = manifest_text(data["site"]["description"].format(total=total))
     photos = [{"thumb": facts[p["file"]]["thumb"], "full": facts[p["file"]]["full"]} for r in rooms for p in r["photos"]]
-    sw = sw_text((root / "src" / "sw.js").read_text(encoding="utf-8"), pages, manifest, photos)
+    cover = facts[data["cover"]]["full"] if data.get("cover") in facts else ""  # only a cover that is hung counts
+    sw = sw_text((root / "src" / "sw.js").read_text(encoding="utf-8"), pages, manifest, photos, cover)
 
     dest = root if out is None else Path(out)
     files = {**{page["file"]: pages[lang] for lang, page in PAGES.items()}, "manifest.webmanifest": manifest, "sw.js": sw}
