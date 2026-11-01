@@ -246,7 +246,7 @@
 - **JS (`tests/js/sw.test.js`)**
   - `route()`가 다음을 맞게 가르는지 본다: 관리 페이지 주소(로그인 `?code=` 포함), 페이지, `index.html`, 썸네일, 원본, 글꼴 두 종류, 다른 출처, scope 밖.
   - 정리 함수(`stale(cachedUrls, photos) -> urls`)를 본다.
-  - `src/sw.js`는 서비스 워커 문맥과 노드 둘 다에서 불러올 수 있게 판단 함수를 내보낸다(`typeof module === 'object'`일 때만 `module.exports`, 서비스 워커 이벤트 등록은 `typeof ServiceWorkerGlobalScope !== 'undefined'`일 때만).
+  - 노드 시험은 `src/sw.js` 틀을 `node:vm`으로 그대로 실행해 판단 함수(`function` 선언)를 꺼내 쓴다. 그래서 서비스 워커 이벤트 등록은 `typeof ServiceWorkerGlobalScope !== 'undefined'`일 때만 하고, 틀의 자리표시(`'__VERSION__'`, `[/*__PHOTOS__*/]`)는 채우기 전에도 올바른 JS다.
 - **브라우저 (내장 브라우저, `serve.py`)**
   - 데스크톱과 375px에서 화면을 본다.
   - 크게 보기를 키보드와 스와이프로 써 본다.
