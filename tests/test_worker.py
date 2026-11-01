@@ -497,6 +497,34 @@ class HandoffTests(FakeRepo, unittest.TestCase):
             self.assertEqual(claude.process("a"), "skipped")
         self.assertEqual((self.item("a")["status"], self.item("a")["error"], self.messages(1)), ("pc", None, ["fake commit"]))
 
+    @staticmethod
+    def sdk_mismatch(*a, **kw):
+        raise TypeError("create() got an unexpected keyword argument 'fallbacks'")  # not a CuratorError: a crash
+
+    def test_a_crash_on_the_claude_path_is_handed_off_not_left_failed(self):
+        self.put_item("a")
+        claude = self.github(self.sdk_mismatch, "handoff", model="claude-opus-5-5")
+        with self.assertLogs("nocturne.worker", "ERROR") as logs:
+            self.assertEqual(claude.process("a"), "handed off")
+        self.assertIsNotNone(logs.records[0].exc_info)  # the traceback is in the log
+        self.assertEqual((self.item("a")["status"], self.item("a")["by"], self.item("a")["error"]),
+                         ("waiting", None, "AI 처리 중 문제가 생겼어요"))
+        message = self.messages(1)[0]
+        self.assertEqual(message, "대기열: a Claude 실패, Ollama로 넘김")
+        for word in ("올림", "다시 시도"):
+            self.assertNotIn(word, message)
+        self.assertEqual((claude.handoffs, list(self.work.iterdir())), ({"a": "AI 처리 중 문제가 생겼어요"}, []))
+        ollama = self.github(FakeAI(), "fail")
+        self.assertEqual(ollama.process("a"), "published")
+        self.assertEqual(photolib.find_photo(self.photos(), "a")[1]["ai"]["model"], "gemma4:e4b-it-qat")
+
+    def test_a_crash_in_fail_mode_is_still_recorded(self):
+        self.put_item("a")
+        with self.assertLogs("nocturne.worker", "ERROR"):
+            self.assertEqual(self.github(self.sdk_mismatch, "fail").process("a"), "failed")
+        self.assertEqual((self.item("a")["status"], self.item("a")["error"]), ("failed", "AI 처리 중 문제가 생겼어요"))
+        self.assertEqual(self.messages(1), ["대기열: a AI 실패"])
+
     def test_without_a_mode_the_worker_decides(self):
         self.put_item("a"); self.put_item("b")
         self.assertEqual(self.github(FakeAI(fail=True)).process("a"), "failed")  # GitHub's e4b: a person has to look
@@ -781,6 +809,13 @@ class MainTests(FakeRepo, unittest.TestCase):
         code, printed, output = self.run_main("--by", "github", "--run", "--ai", "ollama")
         self.assertEqual((code, printed, output), (0, "published: a\n", "earlier=1\npublished=0\nnames=a\npublished=1\n"))
         self.assertEqual(photolib.find_photo(self.photos(), "a")[1]["ai"]["model"], "gemma4:e4b-it-qat")
+    def test_the_warning_is_one_escaped_workflow_command(self):
+        self.put_item("a")
+        reason = "100% 실패\r\n둘째 줄"  # unescaped, % starts an escape and a line break ends the command
+        code, printed, _ = self.run_main("--by", "github", "--run", "--ai", "claude", claude=FakeClaude(fail=reason))
+        self.assertEqual((code, printed.splitlines()),
+                         (0, ["handed off: a", "::warning title=Claude::a: 100%25 실패%0D%0A둘째 줄"]))
+        self.assertEqual(self.item("a")["error"], reason)  # item.json keeps the reason as it was
     def test_claude_pass_without_a_key_takes_nothing(self):
         self.put_item("a")
         before = self.fake.commits(R)

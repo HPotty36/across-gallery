@@ -10,8 +10,8 @@ asking again cannot fix (a photo file is missing or unreadable, the name is take
 claim) is recorded as "failed" for a person to look at; trouble reaching GitHub is not, and the stale rule hands
 the item on. When the AI gives up, the worker's ai_failure decides: the e4b pass records "failed" ("fail"); the
 Claude pass hands the item off to waiting for the e4b pass of the same run ("handoff"), in a commit that does not
-start draft.yml again; the PC hands it back to waiting for GitHub and leaves it alone for RELEASE_SKIP_SECONDS
-("release").
+start draft.yml again, and does the same with an unexpected error, so no photo is left stuck by a Claude-side bug;
+the PC hands it back to waiting for GitHub and leaves it alone for RELEASE_SKIP_SECONDS ("release").
 The PC helper also lets the PC model rewrite text that e4b wrote (upgrade_one, curator.UPGRADE_FROM), never
 text by Claude or by the PC model itself, a field a person edited or the room.
 
@@ -138,7 +138,9 @@ class Worker:
 
         Once the item is claimed, an unexpected error (a malformed model reply, a bug) is logged with its traceback and
         recorded as a failure: left claimed, the item would be claimed again after STALE_SECONDS and fail the same
-        way forever. Trouble with GitHub is raised instead; the stale rule hands the item on.
+        way forever. In handoff mode (the Claude pass) it is handed off instead, so that a Claude-side bug (an SDK
+        that changed, an odd response) leaves the photo to the e4b pass, not stuck as failed. Trouble with GitHub is
+        raised instead; the stale rule hands the item on.
         """
         try:
             found = self.gh.get_json(REPO, _item_path(name))
@@ -156,7 +158,14 @@ class Worker:
             raise
         except Exception:
             log.exception("대기열: %s 처리 중 오류", name)
+            if self._ai_failure_mode() == "handoff":
+                return self._handoff(name, claimed, CRASHED)
             return self._fail(name, claimed, CRASHED)
+
+    def _ai_failure_mode(self):
+        """"release", "handoff" or "fail". Decided when it is needed, not when the worker was made: the default
+        follows `by` ("release" for the PC, "fail" for GitHub)."""
+        return self.ai_failure or ("release" if self.by == "pc" else "fail")
 
     def _publish(self, name, claimed):
         """Draft a claimed item and publish it in one commit (or record why not)."""
@@ -172,8 +181,7 @@ class Worker:
             else:
                 draft = self._draft(f"queue/{name}/thumb.jpg", name, data, claimed["grayscale"], self.model)
         except curator.CuratorError as err:
-            # decided now, not when the worker was made: the default follows `by`
-            mode = self.ai_failure or ("release" if self.by == "pc" else "fail")
+            mode = self._ai_failure_mode()
             if mode == "release":  # the PC: GitHub may manage it
                 return self._release(name, claimed, str(err))
             if mode == "handoff":  # the Claude pass: the e4b pass of the same run may manage it
@@ -348,6 +356,11 @@ class Worker:
 
 # --- command line, for GitHub Actions -----------------------------------------------------------------------
 
+def _command_data(text):
+    """`text` escaped as the message of a GitHub Actions workflow command (::warning ...::<message>): one line."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def _set_output(**values):
     """Hand values to later workflow steps (steps.<id>.outputs.<key>) when running in GitHub Actions."""
     path = os.environ.get("GITHUB_OUTPUT")
@@ -405,7 +418,7 @@ def main(argv=None):
                     continue
                 print(f"{result}: {name}")
                 if result == "handed off":  # on the run's page, so a broken key or used-up credit does not go unseen
-                    print(f"::warning title=Claude::{name}: {worker.handoffs[name]}")
+                    print(f"::warning title=Claude::{_command_data(f'{name}: {worker.handoffs[name]}')}")
                 published += result == "published"
         finally:
             _set_output(published=published)  # the site rebuild step needs it even after a crash
