@@ -5,6 +5,15 @@
 
 export const SHARE_CACHE = 'nocturne-share';
 
+/** This browser's CacheStorage, or null when it has none or merely reading `caches` throws (site data blocked). */
+export function cacheStorage() {
+  try {
+    return globalThis.caches ?? null;
+  } catch {
+    return null;
+  }
+}
+
 const RECEIVED = /(?:^|\/)share\/(\d+)-\d+$/; // share/<ms the worker received it>-<number in that share>
 
 /**

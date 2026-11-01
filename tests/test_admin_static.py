@@ -96,7 +96,7 @@ class AdminStaticTests(unittest.TestCase):
 
     # --- installing the admin page, and sharing photos to it ---
     MANIFEST = {
-        "id": "./", "name": "Nocturne 관리", "short_name": "Nocturne 관리", "lang": "ko", "start_url": "./", "scope": "./",
+        "id": "/nocturne/admin/", "name": "Nocturne 관리", "short_name": "Nocturne 관리", "lang": "ko", "start_url": "./", "scope": "./",
         "display": "standalone", "background_color": "#000", "theme_color": "#000",
         "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
@@ -110,6 +110,12 @@ class AdminStaticTests(unittest.TestCase):
         self.assertTrue(text.endswith("}\n"))
         for icon in self.MANIFEST["icons"]:
             self.assertTrue((helpers.ROOT / "admin" / icon["src"]).is_file(), icon["src"])
+    def test_app_ids_differ_from_the_sites(self):
+        # "id" is resolved against the origin of the start URL, so "./" would be the same identity for the site and
+        # the admin page (both https://hpotty36.github.io/); each takes its own absolute path instead
+        import build
+        admin = json.loads((helpers.ROOT / "admin" / "manifest.webmanifest").read_text(encoding="utf-8"))["id"]
+        self.assertEqual((build.MANIFEST["id"], admin), ("/nocturne/", "/nocturne/admin/"))
     def test_head_links(self):
         t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
         for tag in ('<link rel="manifest" href="manifest.webmanifest">', '<link rel="icon" href="icons/icon-192.png">',

@@ -29,7 +29,7 @@ COPIED = ("photos", "admin", "icons")  # folders published next to index.html wi
 
 # manifest.webmanifest: what a phone needs to install the site. The description is site.description with {total}.
 MANIFEST = {
-    "name": "Nocturne", "short_name": "Nocturne", "id": "./", "start_url": "./", "scope": "./", "display": "standalone",
+    "name": "Nocturne", "short_name": "Nocturne", "id": "/nocturne/", "start_url": "./", "scope": "./", "display": "standalone",
     "background_color": "#000000", "theme_color": "#000000", "lang": "ko", "description": "",
     "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
               {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},

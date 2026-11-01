@@ -187,7 +187,7 @@ class PwaTests(unittest.TestCase):
     def test_manifest(self):
         manifest = json.loads(self.built("manifest.webmanifest"))
         self.assertEqual(manifest, {
-            "name": "Nocturne", "short_name": "Nocturne", "id": "./", "start_url": "./", "scope": "./",
+            "name": "Nocturne", "short_name": "Nocturne", "id": "/nocturne/", "start_url": "./", "scope": "./",
             "display": "standalone", "background_color": "#000000", "theme_color": "#000000", "lang": "ko",
             "description": "사진 3점",
             "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},

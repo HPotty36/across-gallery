@@ -24,7 +24,7 @@ import {
   saveLogin, takeLogin,
 } from './lib/auth.js';
 import { AuthError, GitHub, GitHubError } from './lib/github.js';
-import { pendingShares } from './lib/shared.js';
+import { cacheStorage, pendingShares } from './lib/shared.js';
 import { SiteStatus } from './lib/sitestatus.js';
 import { renderExhibit } from './views/exhibit.js';
 import { addFiles, closeQueue, renderQueue } from './views/queue.js';
@@ -100,7 +100,7 @@ function openLogin(message = '', isError = false) {
 /** Under the login note: how many shared photos wait (nothing when none, or when the cache cannot be read). */
 async function noteShared() {
   const note = $('login-shared');
-  const found = await pendingShares(globalThis.caches);
+  const found = await pendingShares(cacheStorage());
   note.textContent = found.length > 0 ? sharedWaiting(found.length) : '';
   note.hidden = found.length === 0;
 }
@@ -118,7 +118,7 @@ function enter(github) {
 
 /** Shared photos wait: show the "새 사진" tab, where they are offered (the focus follows only if it was on a tab). */
 async function openSharedTab(github) {
-  if ((await pendingShares(globalThis.caches)).length === 0 || client !== github) return;
+  if ((await pendingShares(cacheStorage())).length === 0 || client !== github) return;
   selectTab(tabs[0], tabs.includes(document.activeElement));
 }
 

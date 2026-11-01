@@ -98,7 +98,7 @@
 
 ```json
 {
-  "id": "./",
+  "id": "/nocturne/admin/",
   "name": "Nocturne 관리",
   "short_name": "Nocturne 관리",
   "lang": "ko",
@@ -122,6 +122,7 @@
 ```
 
 - 범위가 `/nocturne/admin/`이라 사이트 앱(`/nocturne/`)과 따로 설치된다.
+- `id`는 시작 주소의 출처를 기준으로 풀리므로 `"./"`를 주면 두 앱이 같은 정체(`https://hpotty36.github.io/`)가 된다. 그래서 사이트(`/nocturne/`)와 관리 페이지(`/nocturne/admin/`)에 서로 다른 절대 경로를 준다. 사이트의 `manifest.webmanifest`(`scripts/build.py`)도 `"id": "/nocturne/"`로 바뀐다.
 - 받는 형식은 사진 고르기와 같은 JPEG와 PNG뿐이다. 그 밖의 사진에는 공유 목록에 Nocturne 관리가 나오지 않는다.
 - 아이콘은 사이트 아이콘을 뒤집은 것이다: `#ebe9e4` 바탕에 검은 "N" (같은 글꼴, 같은 크기). 홈 화면에서 사이트 앱과 한눈에 구별된다. `admin/icons/`에 넷(192, 512, maskable 512, apple-touch 180)을 둔다. 사이트 아이콘에서 Pillow로 만들고 손으로 만든 것으로 둔다 (자동으로 다시 만들지 않는다).
 - `admin/index.html` 머리: `<link rel="manifest" href="manifest.webmanifest">`, `<link rel="icon" href="icons/icon-192.png">`, `<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">`, `<meta name="theme-color" content="#000">`. CSP는 그대로 둔다 (`default-src 'self'`가 manifest와 서비스 워커를 허락한다).

@@ -16,7 +16,7 @@ import { addPhoto, allNames, GalleryError, serialize } from '../lib/gallery.js';
 import { ImageError, processPhoto } from '../lib/image.js';
 import { nameFor, uniqueName } from '../lib/names.js';
 import { canDiscard, hint, label, newItem, toWaiting } from '../lib/queue.js';
-import { dropShares, pendingShares } from '../lib/shared.js';
+import { cacheStorage, dropShares, pendingShares } from '../lib/shared.js';
 
 const DATA = 'src/photos.json';
 const QUEUE = 'queue';
@@ -632,12 +632,14 @@ function build(root) {
   const pick = button('사진 고르기', 'btn btn-main');
   const zone = el('div', 'q-drop', pick, el('p', 'q-drop-text', '여기에 끌어다 놓아도 돼요. 위치 정보는 올리기 전에 이 기기에서 지워요.'), input);
 
-  const shareText = el('p', 'msg');
+  // The message is a live region that stays in the page, empty (no height) while nothing is shared, so a screen
+  // reader hears "공유한 사진 N장" when it fills. Only the box around it and the buttons come and go.
+  const shareText = live(el('p', 'msg'));
   const shareUpload = button('올리기', 'btn btn-main');
   const shareDiscard = button('버리기', 'btn');
-  const share = el('div', 'q-share', shareText, el('div', 'q-actions', shareUpload, shareDiscard));
-  share.setAttribute('role', 'status');
-  share.hidden = true;
+  const shareActions = el('div', 'q-actions', shareUpload, shareDiscard);
+  shareActions.hidden = true;
+  const share = el('div', 'q-share', shareText, shareActions);
 
   const heading = el('h2', 'q-title', '대기열');
   const status = live(el('p', 'msg'));
@@ -653,7 +655,7 @@ function build(root) {
 
   const v = { root, ctx: null, store: new QueueStore(null, null), list, status, retry, empty, loaded: false,
     nodes: new Map(), fading: new Set(), later: new Set(), timer: 0, polling: false, ids: 0,
-    pick, share, shareText, shares: [], shareSeq: 0 };
+    pick, share, shareText, shareActions, shares: [], shareSeq: 0 };
   v.store.onChange = () => draw(v);
 
   const take = (files) => {
@@ -703,7 +705,7 @@ function build(root) {
 /** Read the shared photos again and show (or hide) the line above the picker. A read that an action overtook is dropped. */
 async function refreshShares(v) {
   const seq = ++v.shareSeq;
-  const found = await pendingShares(globalThis.caches); // never rejects: [] when there is nothing, or no cache storage
+  const found = await pendingShares(cacheStorage()); // never rejects: [] when there is nothing, or no cache storage
   if (v !== view || seq !== v.shareSeq) return;
   v.shares = found;
   drawShares(v);
@@ -711,7 +713,8 @@ async function refreshShares(v) {
 
 function drawShares(v) {
   const count = v.shares.length;
-  v.share.hidden = count === 0;
+  v.share.classList.toggle('is-on', count > 0);
+  v.shareActions.hidden = count === 0;
   say(v.shareText, count > 0 ? `공유한 사진 ${count}장` : '');
 }
 
@@ -730,14 +733,18 @@ function takeShares(v) {
 async function uploadShares(v) {
   if (v !== view || v.shares.length === 0) return;
   const taken = takeShares(v);
-  v.store.addFiles(taken.map((s) => s.file)); // the cards are there now; the photos are held in memory
-  await dropShares(globalThis.caches, taken.map((s) => s.key));
+  // The cards are there now. The Files are Blobs made from the cache entries (the browser decides whether their bytes
+  // sit in memory or on disk): each one is read when its turn comes (photos go one at a time), possibly after the
+  // entries below are gone. A Blob keeps its bytes on its own, so that works: checked in Chrome with three 3.9 MB
+  // photos, all three reached queue/ although the cache was emptied right after 올리기. Other browsers were not tried.
+  v.store.addFiles(taken.map((s) => s.file));
+  await dropShares(cacheStorage(), taken.map((s) => s.key));
 }
 
 /** 버리기: gone from the cache; nothing was uploaded. */
 async function discardShares(v) {
   if (v !== view || v.shares.length === 0) return;
-  await dropShares(globalThis.caches, takeShares(v).map((s) => s.key));
+  await dropShares(cacheStorage(), takeShares(v).map((s) => s.key));
 }
 
 /** Read the queue and photos.json, then draw; keeps looking while anything is in the queue. */
