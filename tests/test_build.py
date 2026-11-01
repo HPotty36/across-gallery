@@ -10,10 +10,6 @@ import build
 import photolib
 
 
-def body(html):
-    return html.split("<body>", 1)[1].split("<script>", 1)[0]  # the old <style> still names gone classes until Task 2
-
-
 class BuildTests(unittest.TestCase):
     def setUp(self):
         self.root = helpers.make_site(Path(tempfile.mkdtemp()))
@@ -34,8 +30,8 @@ class BuildTests(unittest.TestCase):
                   '<h2>밤</h2><span class="room-count">1점</span>', '<summary>목록</summary>', '<nav aria-label="전시실">',
                   '<a class="lang" href="en/" lang="en" hreflang="en">English</a>', '사진 3점<br>© 2026 Nocturne<br>'):
             self.assertIn(s, html)
-        for gone in ("room-num", "room-en", "room-note", "lede", "River", "Night", "label-meta", "data-meta"):
-            self.assertNotIn(gone, body(html))
+        for gone in ("room-num", "room-en", "room-note", "lede", "River", "Night", "label-meta", "data-meta", "lb-btn"):
+            self.assertNotIn(gone, html)
         self.assertEqual(html.count('<figure class="print"'), 3)
         self.assertEqual(html.count('<li><a href="#night">밤</a></li>'), 2)  # phone menu and side list
         self.assertIsNone(re.search(r"__[A-Z]+__", html))
@@ -164,12 +160,23 @@ class BuildTests(unittest.TestCase):
 
 
 class TokenTests(unittest.TestCase):
-    def test_contrast(self):
-        dark, light_media, light_attr = helpers.theme_tokens(helpers.ROOT / "src" / "template.html")
-        self.assertEqual(light_media, light_attr)
-        for t in (dark, light_media):
-            for fg, bg, need in (("--ink", "--ground", 7), ("--ink-dim", "--ground", 4.5), ("--lamp", "--ground", 3)):
-                self.assertGreaterEqual(helpers.contrast(t[fg], t[bg]), need, f"{fg} on {bg}")
+    TEMPLATE = helpers.ROOT / "src" / "template.html"
+
+    def test_tokens(self):
+        t = helpers.root_tokens(self.TEMPLATE)
+        want = {"--ground": "#000", "--wall": "#111", "--ink": "#ebe9e4", "--ink-dim": "#8f8c86", "--rule": "#262624"}
+        self.assertEqual({k: t[k] for k in want}, want)
+        self.assertGreaterEqual(helpers.contrast("#ebe9e4", "#000000"), 7)
+        self.assertGreaterEqual(helpers.contrast("#8f8c86", "#000000"), 4.5)
+
+    def test_one_dark_theme_one_font(self):
+        text = self.TEMPLATE.read_text(encoding="utf-8")
+        for gone in ("prefers-color-scheme", 'data-theme', "--lamp", "--lb-", "Cormorant", "IBM Plex", "italic",
+                     "letter-spacing", "text-transform", "lb-btn", "<svg", "사진을 누르면"):
+            self.assertNotIn(gone, text)
+        self.assertIn('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400&display=swap" crossorigin>', text)
+        self.assertIn('<meta name="theme-color" content="#000">', text)
+        self.assertIn("localStorage.setItem('nocturne.lang'", text)  # the toggle remembers the choice
 
 
 if __name__ == "__main__":

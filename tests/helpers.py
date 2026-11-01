@@ -1,4 +1,4 @@
-"""Shared helpers for the test suite: paths, shared cases, JPEG builders, and theme tokens."""
+"""Shared helpers for the test suite: paths, shared cases, JPEG builders, and colour tokens."""
 import json
 import re
 import shutil
@@ -193,17 +193,10 @@ def _block_body(css, selector):
     raise AssertionError(f"unclosed {selector!r} block")
 
 
-def theme_tokens(path):
-    """Colour tokens of a page or stylesheet as (dark, light by media query, light by data-theme).
-
-    dark: the first `:root { }` block; light by media query: the rule inside
-    `@media (prefers-color-scheme: light)`; light by data-theme: `:root[data-theme="light"] { }`.
-    """
+def root_tokens(path):
+    """Custom properties declared in the first `:root { }` block of a page or stylesheet (comments stripped)."""
     css = re.sub(r"/\*.*?\*/", "", Path(path).read_text(encoding="utf-8"), flags=re.S)
-    media = _block_body(css, "@media (prefers-color-scheme: light)")
-    return (_declarations(_block_body(css, ":root")),
-            _declarations(media[media.index("{") + 1:media.rindex("}")]),
-            _declarations(_block_body(css, ':root[data-theme="light"]')))
+    return _declarations(_block_body(css, ":root"))
 
 
 def contrast(a_hex, b_hex):

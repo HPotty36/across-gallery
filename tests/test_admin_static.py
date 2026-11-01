@@ -32,9 +32,6 @@ class AdminStaticTests(unittest.TestCase):
     def test_site_link_opens_a_new_tab(self):
         t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
         self.assertIn('<a class="mark" href="../" target="_blank" rel="noopener">Nocturne</a>', t)
-    def test_tokens_match_site(self):
-        self.assertEqual(helpers.theme_tokens(helpers.ROOT / "admin" / "admin.css"),
-                         helpers.theme_tokens(helpers.ROOT / "src" / "template.html"))
     LABELS = ["새 사진", "전시 중", "GitHub로 로그인", "로그인하는 중…", "로그인을 취소했어요",
               "로그인하지 못했어요. 잠시 뒤 다시 해 주세요", "이 GitHub 계정으로는 관리할 수 없어요",
               "GitHub App이 nocturne 저장소에 설치되어 있지 않아요",

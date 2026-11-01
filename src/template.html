@@ -4,169 +4,103 @@
 <meta charset="utf-8">
 __REDIRECT__
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000">
 <meta name="description" content="__DESCRIPTION__">
 <title>__TITLE__</title>
 __ALTERNATES__
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400&family=Noto+Serif+KR:wght@400&family=IBM+Plex+Sans+KR:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400&display=swap" crossorigin>
 <style>
-/* Nocturne: a dark exhibition room. A thin bar with the name and the room index, one wide
-   cover print with its wall label, then rooms whose prints hang at their own ratios in
-   justified rows, each with a small label underneath. Lamp amber marks only focus and the
-   room in view. The light theme ("white wall") swaps the same colour tokens. */
+/* Nocturne: a black exhibition room in one serif. From 960px a narrow column (name, rooms, fine
+   print) stays at the left while the photos scroll on the right; below that a one-line bar keeps the
+   name, the language link and a drop-down room index at the top. A cover print fits the first screen,
+   then each room hangs its prints at their own ratios in justified rows, each with a "title, date"
+   label. Strong and dim ink do the work an accent colour would: there is none. */
 :root {
   color-scheme: dark;
-  --ground: #141312;
-  --wall: #1c1a18;
-  --ink: #e9e4da;
-  --ink-dim: #8f8a82;
-  --rule: #2b2926;
-  --lamp: #d9a759;
+  --ground: #000;
+  --wall: #111;
+  --ink: #ebe9e4;
+  --ink-dim: #8f8c86;
+  --rule: #262624;
 
-  /* the viewing room stays dark in both themes */
-  --lb-ground: #0c0b0a;
-  --lb-ink: #e9e4da;
-  --lb-dim: #8f8a82;
-  --lb-line: #3a3632;
-  --lb-hover: #22201d;
-  --lb-lamp: #d9a759;
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
-    --ground: #f4f2ee;
-    --wall: #e8e5df;
-    --ink: #1a1917;
-    --ink-dim: #6b665f;
-    --rule: #d9d5ce;
-    --lamp: #8a5a12;
-  }
-}
-:root[data-theme="light"] {
-  color-scheme: light;
-  --ground: #f4f2ee;
-  --wall: #e8e5df;
-  --ink: #1a1917;
-  --ink-dim: #6b665f;
-  --rule: #d9d5ce;
-  --lamp: #8a5a12;
-}
-
-/* type and space */
-:root {
-  --f-mark: "Cormorant Garamond", "Cormorant", Garamond, "Times New Roman", serif;
-  --f-serif: "Noto Serif KR", "Nanum Myeongjo", "AppleMyungjo", "Batang", serif;
-  --f-sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-
-  --page: 1440px;
-  --gutter: clamp(16px, 4vw, 56px);
-  --bar-h: 56px;
-  --hang-gap: clamp(14px, 2vw, 24px);
+  --serif: "Noto Serif KR", "Nanum Myeongjo", "AppleMyungjo", "Batang", serif;
+  --edge: clamp(16px, 3vw, 40px);  /* outer margin of the page */
+  --gap: clamp(10px, 1.3vw, 16px);  /* between prints */
+  --bar: 52px;                      /* the phone bar; there is none from 960px */
+  --lead: 8px;                      /* above the cover, and above a room jumped to from the index */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { scrollbar-gutter: stable; }
+html { scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
 }
-html.lb-open { overflow: hidden; background: var(--lb-ground); }  /* dark under the kept scrollbar gutter too */
+html.lb-open { overflow: hidden; }
 [hidden] { display: none !important; }
 
 body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font-family: var(--f-sans);
-  font-size: 15px;
-  line-height: 1.6;
+  font: 400 14px/1.6 var(--serif);
+  font-variant-numeric: tabular-nums;
   word-break: keep-all;  /* break Korean between words, not syllables */
   overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-a { color: inherit; }
-img { max-width: 100%; }
+a { color: inherit; text-decoration: none; transition: color 0.15s ease; }
+a:hover { color: var(--ink); }
 button { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--lamp); outline-offset: 3px; }
+ul { list-style: none; margin: 0; padding: 0; }
+figure, h2, p { margin: 0; }
+h2 { font: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
-/* ---------- top bar ---------- */
-.bar {
+/* ---------- phone bar: name left; language and the room index right ---------- */
+.side {
   position: sticky;
   top: 0;
   z-index: 20;
-  padding-top: env(safe-area-inset-top, 0px);
-  background: var(--ground);
-  border-bottom: 1px solid var(--rule);
-}
-.bar-in {
-  max-width: var(--page);
-  height: var(--bar-h);
-  margin: 0 auto;
-  padding-inline: var(--gutter);
   display: flex;
   align-items: center;
-  gap: 28px;
+  column-gap: 20px;
+  height: calc(var(--bar) + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) var(--edge) 0;
+  background: var(--ground);
 }
-.bar h1 { margin: 0; flex: none; font: inherit; }
-.mark {
+.mark { margin-right: auto; padding-block: 9px; }  /* 40px to a thumb, and room for the focus ring inside the bar */
+.lang { order: 1; padding-block: 9px; color: var(--ink-dim); }
+.side nav { order: 2; }
+.menu summary {
   display: block;
-  font-family: var(--f-mark);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 26px;
-  line-height: 1;
-  letter-spacing: 0.005em;
-  text-decoration: none;
-  padding-block: 4px 6px;
-}
-.bar-rooms {
-  display: flex;
-  gap: clamp(18px, 2.4vw, 34px);
-  min-width: 0;
-  margin-left: auto;
-  overflow-x: auto;
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
-}
-.bar-rooms::-webkit-scrollbar { display: none; }
-.bar-rooms a {
-  flex: none;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
-  padding-block: 12px;
-  font-family: var(--f-serif);
-  font-size: 14px;
-  line-height: 1.2;
-  white-space: nowrap;
-  text-decoration: none;
+  padding-block: 9px;
   color: var(--ink-dim);
-  transition: color 0.2s ease;
+  list-style: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
 }
-.bar-rooms .num {
-  font-family: var(--f-mark);
-  font-style: italic;
-  font-size: 16px;
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary:hover, .menu[open] summary { color: var(--ink); }
+.menu .rooms {  /* drops from the bottom of the bar, its right edge on the page margin */
+  position: absolute;
+  top: 100%;
+  right: var(--edge);
+  min-width: 9em;
+  padding: 6px 18px;
+  background: var(--ground);
+  border: 1px solid var(--rule);
 }
-.bar-rooms a:hover { color: var(--ink); }
-.bar-rooms a.is-here { color: var(--lamp); }
-.bar-rooms a:focus-visible { outline-offset: -2px; }
+.menu .rooms a { display: block; padding-block: 9px; color: var(--ink-dim); }
+.menu .rooms a:hover, .menu .rooms a.is-here { color: var(--ink); }
+.rooms-side, .fine { display: none; }
 
-/* ---------- page ---------- */
-.page {
-  max-width: var(--page);
-  margin: 0 auto;
-  padding-inline: var(--gutter);
-  container-type: inline-size;
-}
+.main { padding: var(--lead) var(--edge) 0; container-type: inline-size; }
 
-/* the cover hangs as wide as the page, but never taller than the first screen */
-.cover {
-  width: fit-content;
-  max-width: 100%;
-  margin: clamp(28px, 4vw, 48px) auto 0;
-}
+/* ---------- cover: as wide as the column, never taller than the first screen ---------- */
+.cover { margin-bottom: clamp(72px, 9vw, 120px); }
 .cover-btn {
   display: block;
   width: 100%;
@@ -176,105 +110,23 @@ button { font: inherit; color: inherit; }
   background: var(--c, var(--wall));
 }
 @supports (width: 1cqi) {
-  .cover-btn { width: min(100cqi, (100svh - var(--bar-h) - 8rem) * var(--r)); }
+  .cover-btn { width: min(100cqi, (100svh - var(--bar) - 8rem) * var(--r)); }
 }
 .cover-btn img { display: block; width: 100%; height: auto; }
 
-/* wall labels: title left, date (and camera on the cover) right */
-.label {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0 12px;
-  padding-top: 9px;
-}
-.label-title {
-  font-family: var(--f-serif);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.label-meta {
-  font-size: 11px;
-  line-height: 1.5;
-  letter-spacing: 0.02em;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-}
-.cover .label { padding-top: 12px; gap: 0 20px; }
-.cover .label-title { font-size: 14px; }
-.cover .label-meta { font-size: 12px; }
-
-.lede {
-  max-width: 46ch;
-  margin: clamp(36px, 5vw, 64px) 0 0;
-  font-size: 15px;
-  line-height: 1.8;
-  color: var(--ink-dim);
-  text-wrap: pretty;
-}
-
-/* ---------- rooms ---------- */
-.room {
-  margin-top: clamp(64px, 9vw, 128px);
-  padding-top: clamp(16px, 2vw, 28px);
-  scroll-margin-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px));
-}
+/* ---------- rooms: one head line (name, count, span), then the hang ---------- */
+.room { scroll-margin-top: calc(var(--bar) + env(safe-area-inset-top, 0px) + var(--lead)); }  /* clear of the bar */
+.room + .room { margin-top: clamp(64px, 8vw, 104px); }
+.room:last-of-type { min-height: 50vh; min-height: 50svh; }  /* tall enough to reach the middle of the screen and be marked */
 .room-head {
-  display: grid;
-  grid-template-columns: 3.25rem minmax(0, 1fr) auto;
-  grid-template-areas: "num title count" ". note note";
-  align-items: baseline;
-  gap: 6px 0;
-  padding-top: clamp(16px, 1.8vw, 22px);
-  margin-bottom: clamp(24px, 3vw, 40px);
-  border-top: 1px solid var(--rule);
-}
-.room-num {
-  grid-area: num;
-  font-family: var(--f-mark);
-  font-style: italic;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--ink-dim);
-}
-.room-head h2 {
-  grid-area: title;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 16px;
-  margin: 0;
-  font-family: var(--f-serif);
-  font-weight: 400;
-  font-size: clamp(24px, 2.6vw, 32px);
-  line-height: 1.25;
+  column-gap: 8px;
+  margin-bottom: 16px;
 }
-.room-en {
-  font-family: var(--f-mark);
-  font-style: italic;
-  font-size: 15px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
-}
-.room-count {
-  grid-area: count;
-  margin: 0 0 0 16px;
-  font-size: 12px;
-  color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.room-note {
-  grid-area: note;
-  max-width: 46ch;
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--ink-dim);
-  text-wrap: pretty;
-}
+.room-count { color: var(--ink-dim); }
+.room-span { margin-left: auto; font-size: 12px; color: var(--ink-dim); }
 
 /* justified hang: JS sets each print's width and its photo's height (then adds .is-laid);
    without JS every photo stands at a fixed height in its own ratio */
@@ -282,74 +134,81 @@ button { font: inherit; color: inherit; }
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--hang-gap);
+  gap: var(--gap);
 }
-.print {
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: 100%;
-  margin: 0;
-}
+.print { flex: 0 0 auto; min-width: 0; max-width: 100%; }
 .print-btn {
   display: block;
   max-width: 100%;
-  height: 220px;
+  height: 180px;
   aspect-ratio: var(--r);
   padding: 0;
   border: 0;
   cursor: zoom-in;
   background: var(--c, var(--wall));
-  scroll-margin-block: calc(var(--bar-h) + var(--hang-gap)) var(--hang-gap);
+  scroll-margin-block: calc(var(--bar) + env(safe-area-inset-top, 0px) + var(--gap)) var(--gap);
 }
 .hang.is-laid .print-btn { width: 100%; aspect-ratio: auto; }
-.print-btn img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
+.print-btn img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .print-btn img, .cover-btn img { transition: opacity 0.6s ease; }
 .is-loading img { opacity: 0; }
 
-/* ---------- footer ---------- */
+/* wall label: "title, date", the date dim */
+.label { padding-top: 7px; font-size: 13px; line-height: 1.5; }
+.label-date { color: var(--ink-dim); }
+
 .foot {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 4px 24px;
-  margin-top: clamp(96px, 12vw, 160px);
-  padding: 16px 0 calc(32px + env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--rule);
+  margin-top: clamp(64px, 8vw, 104px);
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
   font-size: 12px;
   color: var(--ink-dim);
-  font-variant-numeric: tabular-nums;
 }
-.foot p { margin: 0; }
-.foot a { color: var(--ink-dim); text-underline-offset: 3px; }
-.foot a:hover { color: var(--ink); }
 
-/* ---------- viewing room ---------- */
+/* ---------- wide screens: the side column stays while the photos scroll ---------- */
+@media (min-width: 960px) {
+  :root { --bar: 0px; --lead: var(--edge); }
+  .shell {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    column-gap: clamp(32px, 4vw, 64px);
+    align-items: start;
+    padding-inline: var(--edge);
+  }
+  .side {
+    z-index: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    height: 100vh;
+    height: 100svh;
+    padding: calc(var(--edge) - 6px) 0 var(--edge);  /* the name's capitals line up with the top of the cover */
+  }
+  .mark, .lang { margin-right: 0; padding-block: 0; }
+  .side nav, .lang { order: 0; }
+  .side nav { align-self: stretch; margin-top: 28px; }
+  .menu { display: none; }
+  .rooms-side { display: block; }
+  .rooms-side a { position: relative; display: block; padding-block: 3px; color: var(--ink-dim); }
+  .rooms-side a:hover, .rooms-side a.is-here { color: var(--ink); }
+  .rooms-side a.is-here::before { content: "\2022"; position: absolute; left: -14px; }  /* hung outside the text */
+  .lang { margin-top: 28px; }
+  .fine { display: block; margin-top: auto; font-size: 12px; color: var(--ink-dim); }
+  .main { padding: var(--lead) 0 clamp(64px, 8vw, 104px); }
+  .foot { display: none; }
+}
+
+/* ---------- viewing room: the photo as large as it fits, one line of text under it ---------- */
 .lb {
   position: fixed;
   inset: 0;
   z-index: 50;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: 10px;
   padding:
-    calc(env(safe-area-inset-top, 0px) + 12px)
-    clamp(12px, 2vw, 28px)
-    calc(env(safe-area-inset-bottom, 0px) + 16px);
-  background: var(--lb-ground);
-  color: var(--lb-ink);
-}
-.lb :focus-visible { outline-color: var(--lb-lamp); }
-.lb-top { display: flex; justify-content: space-between; align-items: center; }
-.lb-count {
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  color: var(--lb-dim);
-  font-variant-numeric: tabular-nums;
+    calc(env(safe-area-inset-top, 0px) + var(--edge))
+    var(--edge)
+    calc(env(safe-area-inset-bottom, 0px) + 10px);
+  background: var(--ground);
 }
 .lb-stage {
   position: relative;
@@ -368,61 +227,38 @@ button { font: inherit; color: inherit; }
   height: auto;
   margin: auto;
   object-fit: contain;
-  transition: opacity 0.18s ease;
   -webkit-user-drag: none;
 }
+/* caption left; count and the three text buttons right (on a line of their own when it is narrow) */
 .lb-bar {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: 24px;
+  font-size: 13px;
+  line-height: 1.5;
 }
-.lb-caption { min-width: 0; text-align: center; }
-.lb-title {
-  margin: 0;
-  font-family: var(--f-serif);
-  font-size: 17px;
-  line-height: 1.4;
-}
-.lb-meta {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--lb-dim);
-  font-variant-numeric: tabular-nums;
-}
-.lb-btn {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--lb-line);
-  border-radius: 50%;
-  background: transparent;
-  color: var(--lb-ink);
+.lb-caption { min-width: 0; }
+.lb-date, .lb-nav { color: var(--ink-dim); }
+.lb-nav { margin-left: auto; white-space: nowrap; }
+.lb-count { margin-right: 12px; }
+.lb-link {
+  padding: 11px 0;  /* at least 40px tall to a thumb */
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: color 0.15s ease;
 }
-.lb-btn:hover { background: var(--lb-hover); }
-.lb-btn svg { width: 18px; height: 18px; }
+.lb-link:hover, .lb-link:focus-visible { color: var(--ink); }
+@media (min-width: 960px) {
+  .lb { row-gap: 14px; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
+  .lb-link { padding-block: 3px; }  /* at least 24px tall to a pointer */
+}
 
-@media (max-width: 719px) {
-  :root { --bar-h: 50px; }
-  .mark { font-size: 23px; }
-  .bar-in { gap: 8px; }
-  /* the index may slide sideways: let it run to the screen edge and fade where it is cut */
-  .bar-rooms {
-    margin-right: calc(-1 * var(--gutter));
-    padding-inline: 12px var(--gutter);
-    -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - var(--gutter)), transparent);
-    mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - var(--gutter)), transparent);
-  }
-  .bar-rooms a { font-size: 13px; }
-  .room-head { grid-template-columns: 2.25rem minmax(0, 1fr) auto; }
-  .room-num { font-size: 19px; }
-}
 @media (prefers-reduced-motion: reduce) {
-  .bar-rooms a, .print-btn img, .cover-btn img, .lb-img, .lb-btn { transition: none; }
+  a, .menu summary, .lb-link, .print-btn img, .cover-btn img { transition: none; }
 }
 </style>
 </head>
@@ -454,7 +290,6 @@ __ROOMS__
 <script>
 (function () {
   var all = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
-  var calm = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
   /* ---------- fade photos in as they arrive ---------- */
   all('.print-btn img, .cover-btn img').forEach(function (img) {
@@ -470,21 +305,22 @@ __ROOMS__
   var CAP = 1.6;  // a row taller than CAP x target keeps the target height and stops short
 
   function targetHeight(w) {
-    if (w >= 1100) return 340;
-    if (w >= 720) return 260;
-    return 200;
+    if (w >= 1100) return 300;
+    if (w >= 720) return 240;
+    return 180;
   }
 
   function layoutHang(hang, W) {
-    var gap = parseFloat(getComputedStyle(hang).columnGap) || 0;
-    var T = targetHeight(W);
     var items = all('.print', hang).map(function (el) {
       return { el: el, btn: el.querySelector('.print-btn'), r: parseFloat(el.dataset.w) / parseFloat(el.dataset.h) };
     });
+    var n = items.length;
+    if (!n) return;  // a room with no photos yet has nothing to hang
+    var gap = parseFloat(getComputedStyle(hang).columnGap) || 0;
+    var T = targetHeight(W);
 
     /* split the prints into consecutive rows whose heights stay as close to the target as
        possible; only the last row may be too short to fill the width (it gets capped) */
-    var n = items.length;
     var best = [0], cut = [0];
     for (var i = 1; i <= n; i++) {
       best[i] = Infinity;
@@ -533,28 +369,28 @@ __ROOMS__
     window.addEventListener('resize', function () { hangs.forEach(relayout); });
   }
 
-  /* ---------- the room in view is lit in the bar ---------- */
+  /* ---------- the room in view is marked in both room lists ---------- */
   var rooms = all('.room');
-  var links = {};
-  all('.bar-rooms a').forEach(function (a) { links[a.getAttribute('href').slice(1)] = a; });
+  var links = {};  // room id -> its links in the phone menu and the side list
+  all('.rooms a').forEach(function (a) {
+    var id = a.getAttribute('href').slice(1);
+    (links[id] = links[id] || []).push(a);
+  });
   var here = null;
 
-  function reveal(a) {  // keep the lit room in sight when the index slides sideways
-    var nav = a.parentElement;
-    if (nav.scrollWidth <= nav.clientWidth) return;
-    var cs = getComputedStyle(nav), nr = nav.getBoundingClientRect(), ar = a.getBoundingClientRect();
-    var left = nr.left + parseFloat(cs.paddingLeft), right = nr.right - parseFloat(cs.paddingRight);
-    var dx = ar.left < left ? ar.left - left : (ar.right > right ? ar.right - right : 0);
-    if (dx) nav.scrollBy({ left: dx, behavior: calm.matches ? 'auto' : 'smooth' });
+  function mark(room, on) {
+    ((room && links[room.id]) || []).forEach(function (a) {
+      a.classList.toggle('is-here', on);
+      if (on) a.setAttribute('aria-current', 'true');
+      else a.removeAttribute('aria-current');
+    });
   }
 
   function light(room) {
     if (room === here) return;
-    var old = here && links[here.id];
-    if (old) { old.classList.remove('is-here'); old.removeAttribute('aria-current'); }
+    mark(here, false);
     here = room;
-    var a = room && links[room.id];
-    if (a) { a.classList.add('is-here'); a.setAttribute('aria-current', 'true'); reveal(a); }
+    mark(here, true);
   }
 
   /* the current room is the last one whose top has passed the middle of the screen */
@@ -568,13 +404,29 @@ __ROOMS__
     rooms.forEach(function (r) { io.observe(r); });
   }
 
+  /* ---------- the language link remembers the choice for the next visit to the site root ---------- */
+  var lang = document.querySelector('.lang');
+  if (lang) lang.addEventListener('click', function () {
+    try { localStorage.setItem('nocturne.lang', lang.getAttribute('lang')); } catch (e) {}  // blocked: just not remembered
+  });
+
+  /* ---------- phone room index: folds up on a pick, on Escape and on a tap outside it ---------- */
+  var menu = document.querySelector('.menu');
+  var fold = function () { if (menu) menu.open = false; };
+  if (menu) {
+    all('a', menu).forEach(function (a) { a.addEventListener('click', fold); });
+    document.addEventListener('pointerdown', function (e) {
+      if (menu.open && !menu.contains(e.target)) fold();
+    });
+  }
+
   /* ---------- viewing room ---------- */
   var prints = all('.hang .print');
   var N = prints.length;
   var lb = document.getElementById('lb');
   var lbImg = document.getElementById('lb-img');
   var lbTitle = document.getElementById('lb-title');
-  var lbMeta = document.getElementById('lb-meta');
+  var lbDate = document.getElementById('lb-date');
   var lbCount = document.getElementById('lb-count');
   var btnClose = document.getElementById('lb-close');
   var btnPrev = document.getElementById('lb-prev');
@@ -582,30 +434,39 @@ __ROOMS__
   var stage = document.getElementById('lb-stage');
   var idx = -1;
   var lastFocus = null;
-  var pad = function (n) { return (n < 10 ? '0' : '') + n; };
 
   function preload(i) {
     var im = new Image();
     im.src = prints[(i + N) % N].dataset.full;
   }
 
+  /* the English page falls back to the Korean text where there is no English yet; say so */
+  function setLang(el, value) {
+    if (value) el.setAttribute('lang', value);
+    else el.removeAttribute('lang');
+  }
+
   function show(i) {
     idx = (i + N) % N;
     var p = prints[idx];
+    var thumb = p.querySelector('img');
     var want = idx;
-    lbImg.src = p.dataset.thumb;
-    lbImg.alt = p.querySelector('img').alt;
+    lbImg.src = p.dataset.thumb;  // the thumbnail is already here; the full copy replaces it once it arrives
+    lbImg.alt = thumb.alt;
+    setLang(lbImg, thumb.getAttribute('lang'));
     var full = new Image();
     full.onload = function () { if (idx === want) lbImg.src = full.src; };
     full.src = p.dataset.full;
     lbTitle.textContent = p.dataset.title;
-    lbMeta.textContent = p.dataset.meta;
-    lbCount.textContent = pad(idx + 1) + ' / ' + pad(N);
+    setLang(lbTitle, p.dataset.titleLang);
+    lbDate.textContent = p.dataset.date ? ', ' + p.dataset.date : '';
+    lbCount.textContent = (idx + 1) + ' / ' + N;
     preload(idx + 1);
     preload(idx - 1);
   }
 
   function open(i) {
+    fold();
     lastFocus = document.activeElement;
     show(i);
     lb.hidden = false;
@@ -636,12 +497,19 @@ __ROOMS__
   btnNext.addEventListener('click', function () { show(idx + 1); });
 
   document.addEventListener('keydown', function (e) {
-    if (lb.hidden) return;
+    if (lb.hidden) {
+      if (e.key === 'Escape' && menu && menu.open) {
+        var inside = menu.contains(document.activeElement);
+        fold();
+        if (inside) menu.querySelector('summary').focus();
+      }
+      return;
+    }
     if (e.key === 'Escape') { e.preventDefault(); close(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); show(idx - 1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); show(idx + 1); }
-    else if (e.key === 'Tab') {  // keep focus inside the viewing room
-      var f = [btnClose, btnPrev, btnNext];
+    else if (e.key === 'Tab') {  // keep focus on the three buttons
+      var f = [btnPrev, btnNext, btnClose];
       var at = f.indexOf(document.activeElement);
       e.preventDefault();
       var next = e.shiftKey ? (at <= 0 ? f.length - 1 : at - 1) : (at + 1) % f.length;
@@ -651,6 +519,7 @@ __ROOMS__
 
   /* swipe left or right to move; tap the dark area around the photo to close */
   var sx = 0, sy = 0, tracking = false, swiped = false;
+  stage.addEventListener('dragstart', function (e) { e.preventDefault(); });  // a mouse drag swipes, never drags the image out
   stage.addEventListener('pointerdown', function (e) {
     tracking = true; swiped = false; sx = e.clientX; sy = e.clientY;
   });
