@@ -34,7 +34,7 @@ tests/                   Python unittest, tests/js (node), fake_github.py(가짜
 docs/superpowers/        설계 문서(specs)와 구현 계획(plans)
 originals/               원본 사진. git에 올리지 않음 (.gitignore)
 index.html               로컬 빌드 결과. git에 올리지 않음 (.gitignore, 루트만). 직접 고치지 말 것
-requirements-ai.txt      Claude SDK(anthropic). draft.yml만 설치한다 (사이트 빌드·시험·PC에는 필요 없음)
+requirements-ai.txt      Claude SDK(anthropic), 버전과 해시로 고정. draft.yml만 설치한다 (사이트 빌드·시험·PC에는 필요 없음)
 README.md / README.ko.md 저장소 첫 화면 소개 (영어 기본 / 한국어, 내용 같음)
 LICENSE                  코드는 MIT (GitHub가 MIT로 알아보게 표준 문구만 둔다)
 NOTICE.md                photos/·queue/의 사진은 MIT가 아님 (모든 권리 보유)
@@ -286,6 +286,7 @@ GitHub Actions의 Claude 단계는 저장소 비밀값 `ANTHROPIC_API_KEY`로 Cl
 - Anthropic에는 썸네일(긴 변 1000px, 메타데이터를 지운 사본)과 지시문(방 목록, 기존 사진의 제목·alt 예시)만 보낸다. 큰 사본이나 원본은 보내지 않는다.
 - Claude 비용은 사진 한 장(또는 다시 쓰기 한 번)에 약 $0.02다 (Opus 5.5, effort low). Max 요금제의 API 크레딧에서 나간다. 키가 없으면 Claude 단계는 건너뛰고 e4b로만 돈다.
 - Claude SDK(`anthropic`)는 `draft.yml`의 `Claude SDK 설치` 단계가 `requirements-ai.txt`로 설치한다. 이 단계가 실패해도 실행은 이어지고, Claude 단계가 사진을 모두 e4b로 넘긴다 (`anthropic 패키지가 없어요`).
+- `requirements-ai.txt`는 의존 패키지까지 버전과 sha256 해시로 고정돼 있고 `pip install --require-hashes`로 설치한다. 새 버전으로 올릴 때는 파일 맨 위 주석대로 저장소 밖 빈 폴더에서 `pip download`를 다시 하고, 받은 이름==버전마다 PyPI의 해시를 모두 다시 적는다.
 - API로 만드는 커밋(worker, PC 도우미, 관리 페이지)은 작성자를 `HPotty36 <112685098+HPotty36@users.noreply.github.com>`로 적는다 (`github_api.AUTHOR`, `admin/config.js`의 `COMMIT_AUTHOR`). 계정 프로필의 이름·이메일이 공개 기록에 들어가지 않게 하려는 것이니 지우지 말 것.
 - AI 제목은 40자, 설명은 200자에서 자른다 (낱말 경계에서). 흑백 표시는 자른 뒤에 붙는다.
 - 모델: Actions는 Claude `claude-opus-5-5` (환경변수 `NOCTURNE_CLAUDE_MODEL`), 못 쓴 사진만 `gemma4:e4b-it-qat` (`NOCTURNE_MODEL`). PC는 `gemma4:12b-it-qat` (기본). 더 작은 e2b는 방 설명 문구를 베껴 써서 쓰지 않는다.

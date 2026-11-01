@@ -38,12 +38,31 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn(base_install, t)
         sdk = self.step(t, "Claude SDK 설치")
         self.assertIn("continue-on-error: true", sdk)
-        self.assertIn("run: pip install -r requirements-ai.txt", sdk)
+        self.assertIn("run: pip install --require-hashes -r requirements-ai.txt", sdk)
         base, sdk_at = t.index(base_install), t.index("- name: Claude SDK 설치")
         self.assertLess(t.index("actions/setup-python@"), base)
         self.assertLess(base, sdk_at)
         self.assertLess(sdk_at, t.index("- name: Claude로 초안 쓰고 게시"))
         self.assertLess(sdk_at, t.index("worker.py"))
+    def test_claude_sdk_is_pinned_with_hashes(self):
+        # pip install --require-hashes takes only requirements pinned to one version with their hashes, dependencies
+        # included; a file that changed on PyPI (or on the way) is not installed
+        t = self.text("requirements-ai.txt")
+        self.assertTrue(t.startswith("# "))  # says how the pins were made and how to refresh them
+        self.assertIn("pip download", t)
+        self.assertIn("https://pypi.org/pypi/<name>/<version>/json", t)
+        lines = [line for line in t.replace("\\\n", " ").splitlines() if line.strip() and not line.startswith("#")]
+        pins = {}
+        for line in lines:
+            found = re.fullmatch(r"([a-z0-9-]+)==([0-9][0-9a-z.]*)((?: +--hash=sha256:[0-9a-f]{64})+)", line)
+            self.assertIsNotNone(found, line)
+            pins[found[1]] = found[2]
+        self.assertEqual(list(pins), sorted(pins))
+        self.assertEqual(len(pins), len(lines))  # each package once
+        major, minor = map(int, pins["anthropic"].split(".")[:2])
+        self.assertTrue(major == 1 and minor >= 17, pins["anthropic"])
+        for name in ("pydantic", "pydantic-core", "jiter", "anyio", "typing-extensions"):  # some of what it brings
+            self.assertIn(name, pins)
     def test_draft_steps_run_claude_first_then_ollama_for_what_is_left(self):
         t = self.text(".github/workflows/draft.yml")
         self.assertEqual(re.findall(r"^      - name: (.+)$", t, re.M),

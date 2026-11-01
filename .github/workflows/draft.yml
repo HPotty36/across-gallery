@@ -41,9 +41,10 @@ jobs:
       - run: pip install -r requirements.txt
 
       # 이 설치가 실패해도 e4b 단계는 돈다: Claude 단계는 anthropic을 못 불러와 사진을 e4b로 넘긴다
+      # requirements-ai.txt는 버전과 해시로 고정돼 있어서, 적힌 해시와 다른 파일은 설치하지 않는다
       - name: Claude SDK 설치
         continue-on-error: true
-        run: pip install -r requirements-ai.txt
+        run: pip install --require-hashes -r requirements-ai.txt
 
       # 먼저 Claude가 맡는다. 키가 없으면 아무것도 맡지 않고 넘어간다 (키를 넣기 전에도 아래 e4b로 돈다).
       # Claude가 못 쓴 사진은 대기로 돌려놓아 아래 e4b 단계가 이어받는다.
