@@ -1,21 +1,28 @@
-"""Worker: takes uploads waiting in queue/, has the vision model draft them, and publishes each in one commit.
+"""Worker: takes uploads waiting in queue/, has an AI draft them, and publishes each in one commit.
 
-The PC helper (by="pc", the 12B model) and the GitHub Actions fallback (by="github", e4b) run the same code.
+GitHub Actions (by="github") takes an upload at once: draft.yml runs a Claude pass (the Claude API) and then an
+Ollama pass (e4b) for whatever is left. The PC helper (by="pc", the 12B model) takes only an upload nobody took
+for queue_items.PC_WAIT_SECONDS. All of them run the same code.
 An item is claimed by rewriting its item.json with the file's sha, so of two workers only the first gets it.
 Publishing moves the photo blobs out of the queue, adds the photo to src/photos.json and deletes the queue
 folder, all in one commit, and only while the claim is still ours; so is recording a failure. A failure that
-asking again cannot fix (the AI gave up, a photo file is missing or unreadable, the name is taken, an unexpected
-error after the claim) is recorded as "failed" for a person to look at; trouble reaching GitHub is not, and the
-stale rule hands the item on. When the PC's model gives up, the PC does not record a failure: it hands the item
-back to waiting for GitHub's model and leaves it alone for RELEASE_SKIP_SECONDS.
-The PC helper also lets the PC model rewrite text that another model wrote (upgrade_one), never touching a
-field a person edited or the room.
+asking again cannot fix (a photo file is missing or unreadable, the name is taken, an unexpected error after the
+claim) is recorded as "failed" for a person to look at; trouble reaching GitHub is not, and the stale rule hands
+the item on. When the AI gives up, the worker's ai_failure decides: the e4b pass records "failed" ("fail"); the
+Claude pass hands the item off to waiting for the e4b pass of the same run ("handoff"), in a commit that does not
+start draft.yml again; the PC hands it back to waiting for GitHub and leaves it alone for RELEASE_SKIP_SECONDS
+("release").
+The PC helper also lets the PC model rewrite text that e4b wrote (upgrade_one, curator.UPGRADE_FROM), never
+text by Claude or by the PC model itself, a field a person edited or the room.
 
-    python scripts/worker.py --by github --check   names this worker may take, comma-separated
-    python scripts/worker.py --by github --run     processes them all
-Both use GITHUB_TOKEN and the model from NOCTURNE_MODEL. When GITHUB_OUTPUT is set, --check writes
-names=<comma-separated names> (empty when there is nothing to take) and --run writes published=<count>.
---run exits 0 when every item was handled, 1 when at least one hit an error (photos it published still count).
+    python scripts/worker.py --by github --check [--ai claude]   names this worker may take, comma-separated
+    python scripts/worker.py --by github --run [--ai claude]     processes them all
+Both use GITHUB_TOKEN. --ai ollama (the default) drafts with the model from NOCTURNE_MODEL and records an AI
+failure; --ai claude drafts with the Claude API (model from NOCTURNE_CLAUDE_MODEL, key from ANTHROPIC_API_KEY),
+hands an AI failure off and prints a ::warning line for it, and without a key takes nothing at all. When
+GITHUB_OUTPUT is set, --check writes names=<comma-separated names> (empty when there is nothing to take) and --run
+writes published=<count>. --run exits 0 when every item was handled, 1 when at least one hit an error (photos it
+published still count).
 """
 import argparse
 import logging
@@ -39,7 +46,9 @@ NAME_TAKEN = "같은 이름의 사진이 이미 있어요"
 FILES_MISSING = "대기열 사진 파일이 없어요"
 UNREADABLE = "사진을 읽을 수 없어요"
 CRASHED = "AI 처리 중 문제가 생겼어요"
+NO_CLAUDE_KEY = "Claude API 키가 없어서 Claude 단계를 건너뛰어요"
 RELEASE_SKIP_SECONDS = 1800  # how long the PC leaves an item alone after handing it back
+AI_FAILURES = ("release", "handoff", "fail")  # what a worker does with an item its AI gave up on
 _CLAIMED = {"pc": "PC가 맡음", "github": "GitHub가 맡음"}
 _CLAIM_KEYS = ("status", "by", "claimed_at")  # these tell one claim (or its failure record) from another
 
@@ -76,11 +85,15 @@ def _usable(item, now, by):
 
 class Worker:
     def __init__(self, gh, *, by, model, workdir, drafter=curator.draft,
-                 now_fn=lambda: datetime.now(timezone.utc), pc_model=curator.DEFAULT_MODEL):
+                 now_fn=lambda: datetime.now(timezone.utc), pc_model=curator.DEFAULT_MODEL, ai_failure=None):
+        """ai_failure: "release", "handoff" or "fail" (see AI_FAILURES); None is "release" for the PC, "fail" for GitHub."""
+        if ai_failure is not None and ai_failure not in AI_FAILURES:
+            raise ValueError(f"ai_failure는 release, handoff, fail 중 하나여야 해요: {ai_failure!r}")
         self.gh, self.by, self.model, self.workdir = gh, by, model, Path(workdir)
-        self.drafter, self.now_fn, self.pc_model = drafter, now_fn, pc_model
+        self.drafter, self.now_fn, self.pc_model, self.ai_failure = drafter, now_fn, pc_model, ai_failure
         self.skip = set()  # photos whose upgrade failed in this round; the PC helper clears it for the next round
         self.released = {}  # queue items this worker handed back after its AI gave up -> when; left alone for a while
+        self.handoffs = {}  # queue items this worker handed off to the next pass -> why (the error written in item.json)
         self._items = {}   # queue folder -> (folder sha, its item.json or None), so an unchanged item is not read again
 
     # --- the queue ---
@@ -120,7 +133,8 @@ class Worker:
         return got[0] if _usable(got[0], now, self.by) else False
 
     def process(self, name):
-        """Claim one queue item, draft it and publish it: "published", "failed" (recorded in item.json) or "skipped".
+        """Claim one queue item, draft it and publish it: "published", "failed" (recorded in item.json), "released" or
+        "handed off" (the AI gave up; back to waiting, see ai_failure) or "skipped".
 
         Once the item is claimed, an unexpected error (a malformed model reply, a bug) is logged with its traceback and
         recorded as a failure: left claimed, the item would be claimed again after STALE_SECONDS and fail the same
@@ -158,9 +172,13 @@ class Worker:
             else:
                 draft = self._draft(f"queue/{name}/thumb.jpg", name, data, claimed["grayscale"], self.model)
         except curator.CuratorError as err:
-            if self.by == "pc":  # GitHub's model may manage it; only a GitHub failure is left for a person
+            # decided now, not when the worker was made: the default follows `by`
+            mode = self.ai_failure or ("release" if self.by == "pc" else "fail")
+            if mode == "release":  # the PC: GitHub may manage it
                 return self._release(name, claimed, str(err))
-            return self._fail(name, claimed, str(err))
+            if mode == "handoff":  # the Claude pass: the e4b pass of the same run may manage it
+                return self._handoff(name, claimed, str(err))
+            return self._fail(name, claimed, str(err))  # the e4b pass: left for a person
         except OSError:  # Pillow cannot read the picture
             return self._fail(name, claimed, UNREADABLE)
         except GitHubError as err:
@@ -243,9 +261,25 @@ class Worker:
         return "failed"
 
     def _release(self, name, claimed, note):
-        """Hand the item back to waiting (`note` kept in error) in a commit made only while it holds our claim, and
-        leave it alone for RELEASE_SKIP_SECONDS so the other worker gets it. "released", or "skipped" if it was no
-        longer ours. The message says 다시 시도, which starts draft.yml."""
+        """Hand the item back to waiting (`note` kept in error) and leave it alone for RELEASE_SKIP_SECONDS so the
+        other worker gets it. "released", or "skipped" if it was no longer ours. The message says 다시 시도, which
+        starts draft.yml."""
+        if not self._hand_back(name, claimed, note, f"대기열: {name} 다시 시도 (PC AI 실패)"):
+            return "skipped"
+        self.released[name] = self.now_fn()
+        return "released"
+
+    def _handoff(self, name, claimed, note):
+        """Hand the item off to waiting (`note` kept in error) for the next pass of the same run (Claude -> e4b).
+        "handed off", or "skipped" if it was no longer ours. The message has neither 올림 nor 다시 시도: either would
+        start draft.yml again, only to fail the same way. The item is not left alone: the next pass must take it."""
+        if not self._hand_back(name, claimed, note, f"대기열: {name} Claude 실패, Ollama로 넘김"):
+            return "skipped"
+        self.handoffs[name] = note
+        return "handed off"
+
+    def _hand_back(self, name, claimed, note, message):
+        """Write the item back to waiting in a commit made only while it holds our claim. True if it was written."""
         path = _item_path(name)
 
         def build(read_json):
@@ -253,11 +287,10 @@ class Worker:
                 return {}
             return {path: dump_json(queue_items.release(claimed, note))}
 
-        if self.gh.commit_files(REPO, f"대기열: {name} 다시 시도 (PC AI 실패)", build) is None:
+        if self.gh.commit_files(REPO, message, build) is None:
             log.warning("대기열: %s 돌려놓지 않았어요 (다른 쪽이 맡았거나 이미 없음): %s", name, note)
-            return "skipped"
-        self.released[name] = self.now_fn()
-        return "released"
+            return False
+        return True
 
     def _draft(self, source, stem, data, grayscale, model):
         """Draft from the repository image `source`, copied to workdir/<stem>.jpg while the model looks at it.
@@ -274,17 +307,19 @@ class Worker:
         finally:
             image.unlink(missing_ok=True)
 
-    # --- upgrades: the PC model rewrites what another model wrote ---
+    # --- upgrades: the PC model rewrites what e4b wrote ---
 
     def upgrade_one(self):
         """Rewrite the AI text of the first photo that needs it: ("upgraded" | "failed" | "changed", file), or None.
 
-        Only the fields still listed in ai.fields when the commit is made are replaced; the room and the confidence
-        stay. "changed": by then a person had edited the photo (or taken it down), so nothing was written.
+        A photo needs it while some of its text is still by a model in curator.UPGRADE_FROM (e4b); text by Claude or
+        by the PC model is left alone. Only the fields still listed in ai.fields when the commit is made are replaced;
+        the room and the confidence stay. "changed": by then a person had edited the photo (or taken it down), so
+        nothing was written.
         """
         data = self.gh.get_json(REPO, DATA)[0]
         target = next((photo for room in data["rooms"] for photo in room["photos"]
-                       if photolib.needs_upgrade(photo, self.pc_model) and photo["file"] not in self.skip), None)
+                       if photolib.needs_upgrade(photo, curator.UPGRADE_FROM) and photo["file"] not in self.skip), None)
         if target is None:
             return None
         file = target["file"]
@@ -300,7 +335,7 @@ class Worker:
         def build(read_json):
             current = read_json(DATA)
             photo = _find(current, file)
-            if photo is None or not photolib.needs_upgrade(photo, self.pc_model):
+            if photo is None or not photolib.needs_upgrade(photo, curator.UPGRADE_FROM):
                 return {}
             photolib.apply_ai_text(photo, draft, draft["model"], list(photo["ai"]["fields"]))
             return {DATA: photolib.dumps_data(current)}
@@ -325,18 +360,30 @@ def main(argv=None):
     """--check: print the names this worker may take, comma-separated, and write names=<them> (empty when there
     are none) to GITHUB_OUTPUT. --run: process them all and write published=<count>, even when something crashed
     on the way. Exit 0 when every item was handled, 1 when at least one hit an error; published photos still count.
+    --ai claude: draft with the Claude API and hand an AI failure off to the next pass, with a ::warning line for the
+    run's page; without ANTHROPIC_API_KEY say so, take nothing, write names= or published=0 and exit 0.
     """
     parser = argparse.ArgumentParser(description="대기열의 사진을 AI 초안으로 바로 게시해요 (GitHub Actions용).")
     parser.add_argument("--by", choices=("pc", "github"), required=True, help="맡는 쪽")
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--check", action="store_true", help="맡을 수 있는 항목 이름을 쉼표로 출력")
     action.add_argument("--run", action="store_true", help="맡을 수 있는 항목을 모두 처리")
+    parser.add_argument("--ai", choices=("claude", "ollama"), default="ollama",
+                        help="초안을 쓰는 AI (claude: 실패한 사진은 다음 단계의 Ollama로 넘김)")
     args = parser.parse_args(argv)
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         parser.error("GITHUB_TOKEN이 없어요")
+    if args.ai == "claude":
+        if not os.environ.get("ANTHROPIC_API_KEY"):  # not set, or empty: a secret that does not exist reads as ""
+            print(NO_CLAUDE_KEY)
+            _set_output(**({"names": ""} if args.check else {"published": 0}))
+            return 0
+        options = {"model": curator.claude_model_name(), "drafter": curator.claude_draft, "ai_failure": "handoff"}
+    else:
+        options = {"model": curator.model_name()}
     with tempfile.TemporaryDirectory(prefix="nocturne-") as tmp:
-        worker = Worker(GitHub(token), by=args.by, model=curator.model_name(), workdir=tmp)
+        worker = Worker(GitHub(token), by=args.by, workdir=tmp, **options)
         names = worker.takeable()
         if args.check:
             print(",".join(names))
@@ -357,6 +404,8 @@ def main(argv=None):
                     broken = True
                     continue
                 print(f"{result}: {name}")
+                if result == "handed off":  # on the run's page, so a broken key or used-up credit does not go unseen
+                    print(f"::warning title=Claude::{name}: {worker.handoffs[name]}")
                 published += result == "published"
         finally:
             _set_output(published=published)  # the site rebuild step needs it even after a crash

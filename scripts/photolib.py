@@ -196,10 +196,11 @@ def ai_entry(model, confidence):
     return entry
 
 
-def needs_upgrade(photo, pc_model):
-    """True while some text is still AI-written and the model that wrote it is not pc_model."""
+def needs_upgrade(photo, from_models):
+    """True while some text is still AI-written and the model that wrote it is one of `from_models` (a tuple of names,
+    curator.UPGRADE_FROM): text by any other model (Claude, the PC's own) and text a person wrote are left alone."""
     ai = photo.get("ai")
-    return bool(ai and ai.get("fields")) and ai.get("model") != pc_model
+    return bool(ai and ai.get("fields")) and ai.get("model") in from_models
 
 
 def apply_ai_text(photo, texts, model, fields):

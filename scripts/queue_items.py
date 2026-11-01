@@ -1,11 +1,12 @@
 """Queue item rules: what an upload waiting in queue/<name>/item.json looks like and who may take it.
 
 Pure functions, no I/O. Time is always passed in. The sha-guarded write of the claim lives in the worker.
+GitHub (Claude, then e4b) takes a waiting upload at once; the PC helper only one nobody took for PC_WAIT_SECONDS.
 """
 from datetime import datetime, timezone
 
-WAIT_SECONDS = 60    # GitHub waits this long after the upload so the PC helper gets the first chance
-STALE_SECONDS = 600  # a claim older than this is taken to be dead and may be taken again
+PC_WAIT_SECONDS = 300  # the PC waits this long after the upload so GitHub gets the first chance
+STALE_SECONDS = 600    # a claim older than this is taken to be dead and may be taken again
 
 _FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _WORKERS = ("pc", "github")
@@ -38,14 +39,16 @@ def is_stale(item, now):
 
 
 def can_take(item, now, by):
-    """May worker `by` ("pc" or "github") claim this item now? A failed item is never taken again by itself."""
+    """May worker `by` ("pc" or "github") claim this item now? A stale claim may be taken by either; a waiting item by
+    GitHub at once, by the PC once PC_WAIT_SECONDS have passed since the upload. A failed item is never taken again by
+    itself."""
     if by not in _WORKERS:
         raise ValueError(f"by는 pc 또는 github여야 해요: {by!r}")
     if is_stale(item, now):
         return True
     if item["status"] != "waiting":
         return False
-    return by == "pc" or _age(item["uploaded_at"], now) >= WAIT_SECONDS
+    return by == "github" or _age(item["uploaded_at"], now) >= PC_WAIT_SECONDS
 
 
 def claim(item, by, now):

@@ -38,15 +38,18 @@ class DataTests(unittest.TestCase):
             photolib.find_photo(self.d, "zzz")
 
     def test_upgrade_rules(self):
+        e4b = ("gemma4:e4b-it-qat",)
         _, a2 = photolib.find_photo(self.d, "a2"); _, a1 = photolib.find_photo(self.d, "a1")
-        self.assertTrue(photolib.needs_upgrade(a2, "gemma4:12b-it-qat"))
-        self.assertFalse(photolib.needs_upgrade(a1, "gemma4:12b-it-qat"))
-        self.assertFalse(photolib.needs_upgrade({"ai": {"model": "gemma4:e4b-it-qat", "fields": []}}, "gemma4:12b-it-qat"))
+        self.assertTrue(photolib.needs_upgrade(a2, e4b))  # e4b wrote both texts
+        self.assertFalse(photolib.needs_upgrade(a1, e4b))  # no ai record
+        for better in ("claude-opus-5-5", "gemma4:12b-it-qat"):  # only the models listed are rewritten
+            self.assertFalse(photolib.needs_upgrade({"ai": {"model": better, "fields": ["title", "alt"]}}, e4b))
+        self.assertFalse(photolib.needs_upgrade({"ai": {"model": "gemma4:e4b-it-qat", "fields": []}}, e4b))
         a2["ai"]["fields"] = ["alt"]
         photolib.apply_ai_text(a2, {"title": "새 제목", "alt": "새 설명"}, "gemma4:12b-it-qat", ["alt"])
         self.assertEqual((a2["title"], a2["alt"]), ("다리 아래", "새 설명"))
         self.assertEqual(a2["ai"], {"model": "gemma4:12b-it-qat", "fields": ["alt"], "confidence": 0.61})
-        self.assertFalse(photolib.needs_upgrade(a2, "gemma4:12b-it-qat"))
+        self.assertFalse(photolib.needs_upgrade(a2, e4b))
 
 
 if __name__ == "__main__":

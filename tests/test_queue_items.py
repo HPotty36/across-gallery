@@ -13,15 +13,20 @@ class QueueTests(unittest.TestCase):
         it = queue_items.new_item("redraft-a1", kind="redraft", grayscale=False, now=NOW, file="a1")
         self.assertEqual((it["status"], it["uploaded_at"], it["file"], it["by"]), ("waiting", "2026-10-06T12:00:00Z", "a1", None))
     def test_pc(self):
-        self.assertTrue(queue_items.can_take(self.item(), NOW, "pc"))
-        self.assertTrue(queue_items.can_take(self.item(status="github", claimed_at=ago(601)), NOW, "pc"))
+        self.assertTrue(queue_items.can_take(self.item(uploaded_at=ago(400)), NOW, "pc"))
+        self.assertTrue(queue_items.can_take(self.item(status="github", claimed_at=ago(601)), NOW, "pc"))  # stale: however new the upload
         for st in ("pc", "github"):
             self.assertFalse(queue_items.can_take(self.item(status=st, claimed_at=ago(30)), NOW, "pc"))
         self.assertFalse(queue_items.can_take(self.item(status="failed"), NOW, "pc"))
-    def test_github_waits(self):
-        self.assertFalse(queue_items.can_take(self.item(uploaded_at=ago(30)), NOW, "github"))
-        self.assertTrue(queue_items.can_take(self.item(uploaded_at=ago(61)), NOW, "github"))
+    def test_github_takes_at_once(self):
+        self.assertTrue(queue_items.can_take(self.item(), NOW, "github"))  # uploaded 0 s ago
         self.assertTrue(queue_items.can_take(self.item(status="pc", claimed_at=ago(601)), NOW, "github"))
+        self.assertFalse(queue_items.can_take(self.item(status="pc", claimed_at=ago(30)), NOW, "github"))
+    def test_pc_waits_five_minutes(self):
+        # GitHub (Claude, then e4b) gets the first chance; the PC takes only what nobody took meanwhile
+        self.assertFalse(queue_items.can_take(self.item(), NOW, "pc"))
+        self.assertFalse(queue_items.can_take(self.item(uploaded_at=ago(299)), NOW, "pc"))
+        self.assertTrue(queue_items.can_take(self.item(uploaded_at=ago(300)), NOW, "pc"))
     def test_claim_fail(self):
         c = queue_items.claim(self.item(error="x"), "github", NOW)
         self.assertEqual((c["status"], c["by"], c["claimed_at"], c["error"]), ("github", "github", "2026-10-06T12:00:00Z", None))
@@ -34,8 +39,9 @@ class EdgeTests(unittest.TestCase):
     def test_boundaries(self):
         self.assertFalse(queue_items.is_stale(self.item(status="pc", claimed_at=ago(600)), NOW))
         self.assertTrue(queue_items.is_stale(self.item(status="pc", claimed_at=ago(601)), NOW))
-        self.assertFalse(queue_items.can_take(self.item(uploaded_at=ago(59)), NOW, "github"))
-        self.assertTrue(queue_items.can_take(self.item(uploaded_at=ago(60)), NOW, "github"))
+        self.assertFalse(queue_items.can_take(self.item(uploaded_at=ago(queue_items.PC_WAIT_SECONDS - 1)), NOW, "pc"))
+        self.assertTrue(queue_items.can_take(self.item(uploaded_at=ago(queue_items.PC_WAIT_SECONDS)), NOW, "pc"))
+        self.assertFalse(hasattr(queue_items, "WAIT_SECONDS"))  # GitHub no longer waits for the PC
     def test_failed_is_never_taken_however_old(self):
         old = self.item(status="failed", uploaded_at=ago(99999), claimed_at=ago(99999))
         self.assertFalse(queue_items.is_stale(old, NOW))
