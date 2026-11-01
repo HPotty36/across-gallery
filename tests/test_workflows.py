@@ -1,3 +1,4 @@
+import re
 import subprocess
 import unittest
 
@@ -19,27 +20,58 @@ class WorkflowTests(unittest.TestCase):
     def test_draft(self):
         t = self.text(".github/workflows/draft.yml")
         for s in ("queue/**", "cron:", "workflow_dispatch", "contents: write", "actions: write", "group: draft",
-                  "timeout-minutes: 60", "'올림'", "'다시 시도'", "sleep 60", "worker.py --by github --check",
-                  "worker.py --by github --run", "v0.35.1", "OLLAMA_MODELS", "ollama-gemma4-e4b-it-qat",
-                  "NOCTURNE_MODEL: gemma4:e4b-it-qat", "gh workflow run site.yml"):
+                  "timeout-minutes: 60", "'올림'", "'다시 시도'", "worker.py --by github --check",
+                  "worker.py --by github --run --ai claude", "worker.py --by github --run --ai ollama", "v0.35.1",
+                  "OLLAMA_MODELS", "ollama-gemma4-e4b-it-qat", "NOCTURNE_MODEL: gemma4:e4b-it-qat",
+                  "NOCTURNE_CLAUDE_MODEL: claude-opus-5-5", "gh workflow run site.yml"):
             self.assertIn(s, t)
+    def test_draft_does_not_wait_for_the_pc(self):
+        # GitHub takes an upload at once now: the PC is the one that waits (5 minutes, in the worker)
+        t = self.text(".github/workflows/draft.yml")
+        self.assertNotIn("sleep 60", t)
+        self.assertNotIn("PC가 먼저 맡을 시간 주기", t)
     def test_draft_installs_requirements_before_worker(self):
         t = self.text(".github/workflows/draft.yml")
-        self.assertIn("pip install -r requirements.txt", t)
-        self.assertLess(t.index("actions/setup-python@"), t.index("pip install -r requirements.txt"))
-        self.assertLess(t.index("pip install -r requirements.txt"), t.index("worker.py --by github --check"))
+        self.assertIn("pip install -r requirements.txt -r requirements-ai.txt", t)
+        self.assertLess(t.index("actions/setup-python@"), t.index("pip install -r requirements.txt -r requirements-ai.txt"))
+        self.assertLess(t.index("pip install -r requirements.txt -r requirements-ai.txt"), t.index("worker.py"))
+    def test_draft_steps_run_claude_first_then_ollama_for_what_is_left(self):
+        t = self.text(".github/workflows/draft.yml")
+        self.assertEqual(re.findall(r"^      - name: (.+)$", t, re.M),
+                         ["Claude로 초안 쓰고 게시", "남은 사진 찾기", "Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기",
+                          "Ollama 서버 켜기", "모델 내려받기", "모델 폴더 캐시 저장", "e4b로 초안 쓰고 게시",
+                          "사이트 다시 만들기"])
+        claude = self.step(t, "Claude로 초안 쓰고 게시")
+        self.assertIn("id: claude", claude)
+        self.assertIn("continue-on-error: true", claude)  # a crash must not keep e4b from the rest
+        self.assertIn("run: python scripts/worker.py --by github --run --ai claude", claude)
+        self.assertNotIn("if:", claude)  # the worker itself takes nothing without a key
+        check = self.step(t, "남은 사진 찾기")
+        self.assertIn("id: check", check)
+        self.assertIn("run: python scripts/worker.py --by github --check", check)
+        self.assertNotIn("--ai", check)
+        # nothing left for Ollama: it is not downloaded, cached, started or run
+        for name in ("Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기", "Ollama 서버 켜기", "모델 내려받기",
+                     "모델 폴더 캐시 저장", "e4b로 초안 쓰고 게시"):
+            self.assertIn("if: steps.check.outputs.names != ''", self.step(t, name), name)
+        ollama = self.step(t, "e4b로 초안 쓰고 게시")
+        self.assertIn("id: run", ollama)
+        self.assertIn("run: python scripts/worker.py --by github --run --ai ollama", ollama)
+        self.assertNotIn("continue-on-error", ollama)
     def test_draft_gating(self):
         t = self.text(".github/workflows/draft.yml")
         self.assertIn("steps.check.outputs.names != ''", t)
         # published photos still trigger a rebuild when another item errored
-        self.assertIn("if: ${{ !cancelled() && steps.run.outputs.published != '' && steps.run.outputs.published != '0' }}", t)
+        self.assertIn("if: ${{ !cancelled() && ((steps.claude.outputs.published != '' && steps.claude.outputs.published != '0')"
+                      " || (steps.run.outputs.published != '' && steps.run.outputs.published != '0')) }}", t)
+        self.assertIn("if: ${{ !cancelled()", self.step(t, "사이트 다시 만들기"))
     def test_draft_model_cache_saved_right_after_pull(self):
         t = self.text(".github/workflows/draft.yml")
         for s in ("actions/cache/restore@", "actions/cache/save@", "steps.cache.outputs.cache-hit != 'true'"):
             self.assertIn(s, t)
         self.assertLess(t.index("actions/cache/restore@"), t.index("ollama pull"))
         self.assertLess(t.index("ollama pull"), t.index("actions/cache/save@"))
-        self.assertLess(t.index("actions/cache/save@"), t.index("worker.py --by github --run"))
+        self.assertLess(t.index("actions/cache/save@"), t.index("worker.py --by github --run --ai ollama"))
     def test_draft_concurrency_is_per_job(self):
         t = self.text(".github/workflows/draft.yml")
         # a push whose job `if:` is false (every PC claim commit) must not take the pending slot
@@ -67,11 +99,27 @@ class WorkflowTests(unittest.TestCase):
         t = self.text(".github/workflows/draft.yml")
         job_env = t[t.index("runs-on:"):t.index("    steps:")]
         self.assertNotIn("GITHUB_TOKEN", job_env)
-        self.assertEqual(t.count("GITHUB_TOKEN:"), 2)
-        for name in ("맡을 사진 찾기", "초안 쓰고 게시"):
+        self.assertEqual(t.count("GITHUB_TOKEN:"), 3)
+        for name in ("Claude로 초안 쓰고 게시", "남은 사진 찾기", "e4b로 초안 쓰고 게시"):
             self.assertIn("env:\n          GITHUB_TOKEN: ${{ github.token }}", self.step(t, name), name)
-        for name in ("Ollama v0.35.1 내려받기", "Ollama 서버 켜기", "모델 내려받기"):
+        for name in ("Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기", "Ollama 서버 켜기", "모델 내려받기",
+                     "모델 폴더 캐시 저장"):
             self.assertNotIn("TOKEN", self.step(t, name), name)
+    def test_draft_anthropic_key_only_on_the_claude_step(self):
+        # the key is a secret: it must not reach the job env, the Ollama steps, or the steps after them
+        t = self.text(".github/workflows/draft.yml")
+        job_env = t[t.index("runs-on:"):t.index("    steps:")]
+        self.assertNotIn("ANTHROPIC", job_env)
+        self.assertEqual(t.count("secrets."), 1)
+        self.assertEqual(t.count("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}"), 1)
+        self.assertIn("env:\n          GITHUB_TOKEN: ${{ github.token }}\n          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}",
+                      self.step(t, "Claude로 초안 쓰고 게시"))
+        for name in ("남은 사진 찾기", "Ollama v0.35.1 내려받기", "모델 폴더 캐시 불러오기", "Ollama 서버 켜기",
+                     "모델 내려받기", "모델 폴더 캐시 저장", "e4b로 초안 쓰고 게시", "사이트 다시 만들기"):
+            self.assertNotIn("ANTHROPIC", self.step(t, name), name)
+        # the model names are not secrets: the job env carries both, so changing a model is one line
+        self.assertIn("NOCTURNE_CLAUDE_MODEL: claude-opus-5-5", job_env)
+        self.assertIn("NOCTURNE_MODEL: gemma4:e4b-it-qat", job_env)
     def test_draft_ollama_archive_checksum(self):
         t = self.text(".github/workflows/draft.yml")
         download = self.step(t, "Ollama v0.35.1 내려받기")

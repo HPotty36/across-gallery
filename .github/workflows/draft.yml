@@ -1,6 +1,8 @@
 name: Draft
 
-# GitHub 대타: PC가 60초 안에 맡지 않은 대기열 사진을 작은 모델로 초안 쓰고 게시한다.
+# GitHub 대타: 올린 사진을 GitHub가 바로 맡는다. 먼저 Claude가 초안을 쓰고 게시하고,
+# Claude가 못 쓴 사진만 같은 실행 안에서 e4b(Ollama)가 이어서 쓴다.
+# PC 도우미는 올린 지 5분이 지나도 아무도 맡지 않은 사진을 가져간다.
 on:
   push:
     branches: [main]
@@ -22,9 +24,11 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # 쓰기 권한이 있는 토큰은 worker 단계에만 준다 (내려받은 Ollama가 도는 단계에는 없다)
+    # 쓰기 권한이 있는 토큰과 Anthropic 키는 worker 단계에만 준다 (내려받은 Ollama가 도는 단계에는 없다).
+    # 여기에는 비밀이 아닌 모델 이름만 둔다. Claude 모델을 바꾸려면 아래 값만 고친다
     env:
       NOCTURNE_MODEL: gemma4:e4b-it-qat
+      NOCTURNE_CLAUDE_MODEL: claude-opus-5-5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -34,13 +38,21 @@ jobs:
         with:
           python-version: "3.14"
 
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -r requirements-ai.txt
 
-      - name: PC가 먼저 맡을 시간 주기
-        if: github.event_name == 'push'
-        run: sleep 60
+      # 먼저 Claude가 맡는다. 키가 없으면 아무것도 맡지 않고 넘어간다 (키를 넣기 전에도 아래 e4b로 돈다).
+      # Claude가 못 쓴 사진은 대기로 돌려놓아 아래 e4b 단계가 이어받는다.
+      # 이 단계가 통째로 죽어도 e4b 단계는 돌아야 해서 continue-on-error를 둔다
+      - name: Claude로 초안 쓰고 게시
+        id: claude
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python scripts/worker.py --by github --run --ai claude
 
-      - name: 맡을 사진 찾기
+      # Claude가 못 쓴 사진(키가 없을 때는 전부)이 남았을 때만 아래 Ollama 단계들이 돈다
+      - name: 남은 사진 찾기
         id: check
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -98,16 +110,18 @@ jobs:
           path: ${{ env.OLLAMA_MODELS }}
           key: ollama-gemma4-e4b-it-qat
 
-      - name: 초안 쓰고 게시
+      # Claude 단계가 못 쓴 사진은 여기서 실패하면 failed가 된다 (사람이 새 사진 탭에서 다시 시도)
+      - name: e4b로 초안 쓰고 게시
         id: run
         if: steps.check.outputs.names != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/worker.py --by github --run
+        run: python scripts/worker.py --by github --run --ai ollama
 
       # GITHUB_TOKEN으로 만든 push는 다른 워크플로를 시작하지 않으므로 직접 부른다
+      # (Claude 단계나 e4b 단계 중 하나라도 게시했으면)
       - name: 사이트 다시 만들기
-        if: ${{ !cancelled() && steps.run.outputs.published != '' && steps.run.outputs.published != '0' }}
+        if: ${{ !cancelled() && ((steps.claude.outputs.published != '' && steps.claude.outputs.published != '0') || (steps.run.outputs.published != '' && steps.run.outputs.published != '0')) }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run site.yml --ref main
