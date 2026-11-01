@@ -18,7 +18,8 @@
         {"file":"0404","title":"사장교와 구름","alt":"뭉게구름 아래 강을 가로지르는 사장교"},
         {"file":"0412","title":"구름 많은 오후","alt":"구름 낀 파란 하늘 아래 잔잔한 강과 멀리 보이는 다리"},
         {"file":"0308","title":"해 질 녘","alt":"해 질 녘 강 위로 검게 드리운 도시의 실루엣"},
-        {"file":"0306","title":"나무 사이로 본 강","alt":"나무 사이로 보이는 강과 먼 산, 흑백 사진","date":"2026.09.03","camera":"iPhone 12 mini · f/1.6 · 1/121s · ISO 100"}
+        {"file":"0306","title":"나무 사이로 본 강","alt":"나무 사이로 보이는 강과 먼 산, 흑백 사진","date":"2026.09.03","camera":"iPhone 12 mini · f/1.6 · 1/121s · ISO 100"},
+        {"file":"0475_edited","title":"도시의 반영","alt":"잔잔한 수면에 도시의 건물들이 비치는 풍경","date":"2026.10.16","camera":"iPhone 12 Mini · f/1.6 · 1/2618s · ISO 32","ai":{"model":"gemma4:e4b-it-qat","fields":["title","alt"],"confidence":1}}
       ]
     },
     {
