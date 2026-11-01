@@ -6,7 +6,8 @@
     ["IMG_E1234.HEIC.jpg", "e1234_heic"],
     ["IMG_0475_EDITED.JPG", "0475"], ["1000017291_edited.jpg", "1000017291"], ["1000017291 (edited).jpg", "1000017291"],
     ["IMG_0475-Edited.jpg", "0475"], ["IMG_0475 edited.jpg", "0475"], ["editedphoto.jpg", "editedphoto"],
-    ["my edited trip.jpg", "my_trip"]
+    ["my edited trip.jpg", "my_trip"],
+    ["ed\u0130ted.jpg", "edi_ted"], ["ed\u0131ted.jpg", "ed_ted"], ["\u212aedited.jpg", "k"], ["\u017fedited.jpg", "photo"]
   ],
   "grayscale": [
     {"base": [128,128,128], "count": 100, "spots": [], "expect": true},

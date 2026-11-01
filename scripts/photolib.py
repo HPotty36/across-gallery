@@ -28,7 +28,8 @@ def name_for(filename):
     """Web name for an original file name: IMG_0306_Edited.jpeg -> 0306. "edited" as a separate word, in any case,
     goes with its separator and brackets: "a (EDITED)" -> a."""
     stem = Path(filename).stem
-    stem = re.sub(r"[ _.-]*\(?(?<![A-Za-z0-9])edited(?![A-Za-z0-9])\)?", "", stem, flags=re.IGNORECASE)
+    # re.ASCII, like JS /i: dotless i, dotted I, long s and the Kelvin sign do not count as i, s, k
+    stem = re.sub(r"[ _.-]*\(?(?<![A-Za-z0-9])edited(?![A-Za-z0-9])\)?", "", stem, flags=re.IGNORECASE | re.ASCII)
     if stem.upper().startswith("IMG_"):
         stem = stem[4:]
     stem = re.sub(r"[^a-z0-9_-]+", "_", stem.lower()).strip("_-")
