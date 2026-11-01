@@ -100,6 +100,7 @@ class Worker:
         self.gh, self.by, self.model, self.workdir = gh, by, model, Path(workdir)
         self.drafter, self.now_fn, self.pc_model, self.ai_failure = drafter, now_fn, pc_model, ai_failure
         self.skip = set()  # photos whose upgrade failed in this round; the PC helper clears it for the next round
+        self.upgrade_file = None  # the photo upgrade_one is working on, so a caller can tell which one an error was about
         self.released = {}  # queue items this worker handed back after its AI gave up -> when; left alone for a while
         self.handoffs = {}  # queue items this worker handed off to the next pass -> why (the error written in item.json)
         self._items = {}   # queue folder -> (folder sha, its item.json or None), so an unchanged item is not read again
@@ -233,7 +234,7 @@ class Worker:
                 # meanwhile is theirs, so it is not replaced and not marked as AI text.
                 fields = [f for f in photolib.AI_FIELDS if photo and photo.get(f) == asked.get(f)]
                 if not fields:
-                    return changes  # taken down, or both texts rewritten by a person: only the queue entry goes
+                    return changes  # taken down, or all four texts rewritten by a person: only the queue entry goes
                 if photo.get("ai"):
                     photo["ai"]["fields"] = []
                 photolib.apply_ai_text(photo, draft, draft["model"], fields)
@@ -343,12 +344,13 @@ class Worker:
         the room and the confidence stay. "changed": by then a person had edited the photo (or taken it down), so
         nothing was written.
         """
+        self.upgrade_file = None
         data = self.gh.get_json(REPO, DATA)[0]
         target = next((photo for room in data["rooms"] for photo in room["photos"]
                        if photolib.needs_upgrade(photo, curator.UPGRADE_FROM) and photo["file"] not in self.skip), None)
         if target is None:
             return None
-        file = target["file"]
+        file = self.upgrade_file = target["file"]
         try:
             draft = self._draft(f"photos/thumb/{file}.jpg", file, data, None, self.pc_model)
         except (curator.CuratorError, GitHubError, OSError) as err:

@@ -84,8 +84,10 @@ class ParseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 curator.parse_reply(bad, self.ids)
 
-    def test_both_english_texts_are_required_and_not_blank(self):
-        for key in ("title_en", "alt_en"):
+    def test_all_four_texts_are_required_and_not_blank(self):
+        # the error names the missing text in Korean, with the particle that fits
+        said = {"title": "제목이", "alt": "설명이", "title_en": "영어 제목이", "alt_en": "영어 설명이"}
+        for key, name in said.items():
             missing = json.loads(reply_json())
             del missing[key]
             for label, reply in (("missing", json.dumps(missing)), ("empty", reply_json(**{key: ""})),
@@ -93,7 +95,7 @@ class ParseTests(unittest.TestCase):
                                  ("number", reply_json(**{key: 5}))):
                 with self.subTest(key=key, case=label), self.assertRaises(ValueError) as cm:
                     curator.parse_reply(reply, self.ids)
-                self.assertIn(key, str(cm.exception))
+                self.assertEqual(str(cm.exception), f"{name} 비어 있어요")
 
     def test_english_texts_are_stripped(self):
         got = curator.parse_reply(reply_json(title_en="  Payphone ", alt_en="\nA red booth \n"), self.ids)
@@ -230,7 +232,7 @@ class DraftTests(unittest.TestCase):
         self.assertEqual((len(calls), r["title_en"], r["alt_en"]), (3, "T", "A"))
         with self.assertRaises(curator.CuratorError) as cm:
             curator.draft(self.img, helpers.SITE, False, post=lambda p, t: self.reply('{"room": "night", "title": "t", "alt": "a"}'))
-        self.assertIn("title_en", str(cm.exception))
+        self.assertIn("영어 제목이 비어 있어요", str(cm.exception))
 
     def test_three_attempts(self):
         calls = []

@@ -69,6 +69,46 @@ class HelperTests(FakeRepo, unittest.TestCase):
         self.assertIsNone(self.h.tick())  # skipped until the next look
         self.clock[0] = NOW + timedelta(minutes=30)
         self.assertEqual(self.h.tick(), "upgraded:a2")
+    def test_an_unexpected_error_in_an_upgrade_does_not_repeat_every_tick(self):
+        # e.g. a helper still running code older than the data: the model must not be asked again on every tick
+        broken = mock.Mock(side_effect=KeyError("title_en"))
+        self.w.upgrade_one = broken
+        with self.assertLogs("nocturne.helper", "ERROR") as logs:
+            self.assertIsNone(self.h.tick())
+        self.assertEqual(broken.call_count, 1)
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("KeyError", logs.output[0])  # with its traceback
+        self.assertIsNotNone(logs.records[0].exc_info)
+        for _ in range(3):
+            self.assertIsNone(self.h.tick())
+        self.assertEqual(broken.call_count, 1)
+        self.clock[0] = NOW + timedelta(minutes=31)  # the next look tries once more
+        with self.assertLogs("nocturne.helper", "ERROR"):
+            self.assertIsNone(self.h.tick())
+        self.assertEqual(broken.call_count, 2)
+    def test_an_unexpected_error_after_the_model_answered_skips_that_photo(self):
+        with mock.patch.object(photolib, "apply_ai_text", side_effect=KeyError("title_en")),                 self.assertLogs("nocturne.helper", "ERROR") as logs:
+            self.assertEqual(self.h.tick(), "failed:a2")
+        self.assertEqual(logs.output[0].splitlines()[0], "ERROR:nocturne.helper:다듬기 중 오류 (a2)")
+        self.assertIn("KeyError: 'title_en'", logs.output[0])  # with its traceback
+        self.assertEqual(self.w.drafter.calls, 1)
+        self.assertEqual(self.w.skip, {"a2"})
+        for _ in range(3):
+            self.assertIsNone(self.h.tick())
+        self.assertEqual(self.w.drafter.calls, 1)  # no second 12B call
+        self.clock[0] = NOW + timedelta(minutes=31)  # fixed by then: the next look upgrades it
+        self.assertEqual(self.h.tick(), "upgraded:a2")
+        self.assertEqual(self.w.drafter.calls, 2)
+    def test_trouble_with_github_is_still_tried_again_at_the_next_tick(self):
+        errors = [GitHubError("GitHub 502: bad gateway", 502)]
+        def upgrade_one():
+            if errors:
+                raise errors.pop()
+            return ("upgraded", "a2")
+        self.w.upgrade_one = upgrade_one
+        with self.assertRaises(GitHubError):  # run() logs it as one line
+            self.h.tick()
+        self.assertEqual(self.h.tick(), "upgraded:a2")
     def test_failed_queue_item(self):
         # the PC hands an item its AI gave up on back to waiting, for GitHub, and leaves it alone meanwhile
         self.put_item("a"); self.w.drafter = FakeAI(fail=True)

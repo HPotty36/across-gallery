@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import curator
-from github_api import GitHub
+from github_api import GitHub, GitHubError
 from worker import Worker
 
 POLL_SECONDS = 20
@@ -73,7 +73,21 @@ class Helper:
             self.next_look = now + timedelta(seconds=UPGRADE_EVERY)
         if not self.upgrading:
             return None
-        done = self.worker.upgrade_one()
+        try:
+            done = self.worker.upgrade_one()
+        except GitHubError:
+            raise  # GitHub may be back by the next tick: run() logs it in one line and the round goes on
+        except Exception:
+            # Something upgrade_one does not expect (a bug, code older than the data it reads): the same photo would
+            # fail the same way, with the 12B model asked again, on every tick. Log it once with its traceback, leave
+            # that photo alone and end this round; the next look (after UPGRADE_EVERY) tries again.
+            file = self.worker.upgrade_file
+            log.exception("다듬기 중 오류%s", f" ({file})" if file else "")
+            self.upgrading = False
+            if file is None:
+                return None
+            self.worker.skip.add(file)
+            return f"failed:{file}"
         if done is None:
             self.upgrading = False
             return None

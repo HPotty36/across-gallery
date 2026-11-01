@@ -124,17 +124,21 @@ def _load_reply(text):
     return reply
 
 
+# The four texts of a reply, as named in an error ("<name> 비어 있어요"): each with the particle that fits it.
+TEXT_NAMES = {"title": "제목이", "alt": "설명이", "title_en": "영어 제목이", "alt_en": "영어 설명이"}
+
+
 def parse_reply(text, room_ids):
     """{"room", "title", "alt", "title_en", "alt_en", "known"} from the model's JSON; an unknown room falls back to the
     first one. All four texts must be there and not blank. They are cut to TITLE_MAX, ALT_MAX, TITLE_EN_MAX and
     ALT_EN_MAX characters (see clamp)."""
     reply = _load_reply(text)
     fields = {}
-    for key in ("title", "alt", "title_en", "alt_en"):
+    for key, name in TEXT_NAMES.items():
         value = reply.get(key)
         fields[key] = value.strip() if isinstance(value, str) else ""
         if not fields[key]:
-            raise ValueError(f"{key}가 비어 있어요")
+            raise ValueError(f"{name} 비어 있어요")
     room = reply.get("room")
     room = room.strip() if isinstance(room, str) else ""
     known = room in room_ids
