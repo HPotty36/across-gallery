@@ -50,6 +50,7 @@ const PHOTOS = [{ thumb: 'photos/thumb/a1.jpg?v=aaaaaaaa', full: 'photos/full/a1
 async function install({ cover, cached = {}, network = () => ({ ok: true, type: 'basic' }) }) {
   const stores = new Map(Object.entries(cached).map(([name, urls]) => [name, new Map(urls.map((u) => [u, { ok: true, old: true }]))]));
   const fetched = [];
+  const deleted = [];
   const listeners = {};
   let skipped = false;
   const keyOf = (key) => (typeof key === 'string' ? key : key.url);
@@ -66,6 +67,7 @@ async function install({ cover, cached = {}, network = () => ({ ok: true, type: 
       };
     },
     keys: async () => [...stores.keys()],
+    delete: async (name) => { deleted.push(name); return stores.delete(name); },
   };
   const source = template.replace("'__VERSION__'", "'test'").replace('[/*__PHOTOS__*/]', JSON.stringify(PHOTOS))
     .replace("'' /*__COVER__*/", JSON.stringify(cover));
@@ -81,7 +83,7 @@ async function install({ cover, cached = {}, network = () => ({ ok: true, type: 
   listeners.install({ waitUntil: (p) => { done = p; } });
   await done;
   const urls = (name) => [...(stores.get(name) || new Map()).keys()];
-  return { fetched, skipped, thumbs: urls('nocturne-thumbs'), full: urls('nocturne-full'), stores };
+  return { fetched, skipped, thumbs: urls('nocturne-thumbs'), full: urls('nocturne-full'), stores, listeners, deleted };
 }
 
 test('install keeps every thumbnail and the cover, so the first page shows offline', async () => {
@@ -111,4 +113,15 @@ test('a cover that cannot be had never fails the install', async () => {
     assert.deepEqual(r.thumbs, PHOTOS.map((p) => S + p.thumb));  // ... and the rest went on
     assert.equal(r.skipped, true);
   }
+});
+
+test("activate drops this site's old caches but keeps nocturne-share (the admin page's shared photos) and other sites'", async () => {
+  const r = await install({ cover: '', cached: { 'nocturne-share': [S + 'admin/share/1-0'], 'nocturne-old': [S + 'x'], other: [S + 'y'] } });
+  let done;
+  r.listeners.activate({ waitUntil: (p) => { done = p; } });
+  await done;
+  assert.deepEqual(r.deleted, ['nocturne-old']);
+  assert.deepEqual([...r.stores.get('nocturne-share').keys()], [S + 'admin/share/1-0']);  // the shared photo is still there
+  assert.ok(r.stores.has('other'));
+  for (const name of ['nocturne-page', 'nocturne-thumbs', 'nocturne-full']) assert.ok(r.stores.has(name), name);
 });

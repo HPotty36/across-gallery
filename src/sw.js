@@ -9,7 +9,8 @@
 
    Caches: nocturne-page (both pages, the manifest, the icons), nocturne-thumbs (every thumbnail on show),
    nocturne-full (the cover, then full-size copies once viewed), nocturne-fonts (the Google Fonts stylesheet and
-   font files).
+   font files). nocturne-share belongs to the admin page's worker (admin/sw.js: photos shared to it wait there for the
+   person to upload them); it is kept, never read or cleaned here.
    admin/ is never answered here: the admin page, its GitHub login return and its API calls go to the network
    exactly as if there were no service worker. */
 
@@ -21,6 +22,7 @@ const PAGE = 'nocturne-page';
 const THUMBS = 'nocturne-thumbs';
 const FULL = 'nocturne-full';
 const FONTS = 'nocturne-fonts';
+const SHARE = 'nocturne-share';  // the admin page's (admin/sw.js); only named so that activate does not delete it
 const TIMEOUT = 4000;  // ms a page waits for the network before the copy on the device is shown
 const SHELL = ['manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
                'icons/apple-touch-icon.png'];
@@ -64,7 +66,7 @@ if (typeof ServiceWorkerGlobalScope !== 'undefined') {
   const scope = self.registration.scope;
   const at = (path) => new URL(path, scope).href;
   const shown = new Set(PHOTOS.flatMap((p) => [at(p.thumb), at(p.full)]));
-  const ours = [PAGE, THUMBS, FULL, FONTS];
+  const ours = [PAGE, THUMBS, FULL, FONTS, SHARE];
   const quiet = () => {};
 
   /* Fetches the request and, when keep(response), stores a copy under key while the event lives. The copy is

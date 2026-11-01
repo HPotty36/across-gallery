@@ -1,6 +1,9 @@
+import json
 import re
 import unittest
 from urllib.parse import urlsplit
+
+from PIL import Image
 
 import helpers
 
@@ -84,11 +87,47 @@ class AdminStaticTests(unittest.TestCase):
               "올리는 중…", "올리지 못했어요", "다시 올리기", "AI 대기", "PC AI가 보는 중…", "GitHub AI가 보는 중… (몇 분)",
               "AI 실패", "다시 시도", "직접 입력해서 게시", "버리기", "게시됨", "흑백 감지", "위치 정보 삭제됨",
               "AI가 오래 걸리고 있어요", "버려도 올린 사진은 공개 저장소의 기록에 남아요",
-              "영어 제목", "영어 설명", "AI 한국어", "AI 영어", "다듬기 대기"]
+              "영어 제목", "영어 설명", "AI 한국어", "AI 영어", "다듬기 대기",
+              "공유한 사진", "올리기", "로그인하면 올릴 수 있어요"]
     def test_labels(self):
         t = "".join(p.read_text(encoding="utf-8") for p in js_files()) + (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
         for s in self.LABELS:
             self.assertIn(s, t)
+
+    # --- installing the admin page, and sharing photos to it ---
+    MANIFEST = {
+        "id": "./", "name": "Nocturne 관리", "short_name": "Nocturne 관리", "lang": "ko", "start_url": "./", "scope": "./",
+        "display": "standalone", "background_color": "#000", "theme_color": "#000",
+        "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                  {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                  {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}],
+        "share_target": {"action": "share", "method": "POST", "enctype": "multipart/form-data",
+                         "params": {"files": [{"name": "photos", "accept": ["image/jpeg", "image/png"]}]}},
+    }
+    def test_manifest(self):
+        text = (helpers.ROOT / "admin" / "manifest.webmanifest").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(text), self.MANIFEST)
+        self.assertTrue(text.endswith("}\n"))
+        for icon in self.MANIFEST["icons"]:
+            self.assertTrue((helpers.ROOT / "admin" / icon["src"]).is_file(), icon["src"])
+    def test_head_links(self):
+        t = (helpers.ROOT / "admin" / "index.html").read_text(encoding="utf-8")
+        for tag in ('<link rel="manifest" href="manifest.webmanifest">', '<link rel="icon" href="icons/icon-192.png">',
+                    '<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">', '<meta name="theme-color" content="#000">'):
+            self.assertEqual(t.count(tag), 1, tag)
+        self.assertLess(t.index('<link rel="manifest"'), t.index('<script'))
+    def test_icons(self):
+        for name, size in (("icon-192", 192), ("icon-512", 512), ("icon-maskable-512", 512), ("apple-touch-icon", 180)):
+            with Image.open(helpers.ROOT / "admin" / "icons" / f"{name}.png") as icon:
+                self.assertEqual(icon.size, (size, size), name)
+                self.assertIn(icon.mode, ("RGB", "RGBA"), name)
+                corner = icon.convert("RGB").getpixel((0, 0))  # the cream ground (the site's icons are the other way round)
+                for got, want in zip(corner, (235, 233, 228)):
+                    self.assertLessEqual(abs(got - want), 2, f"{name} {corner}")
+    def test_worker_is_a_plain_file_that_only_takes_the_share(self):
+        t = (helpers.ROOT / "admin" / "sw.js").read_text(encoding="utf-8")
+        self.assertNotRegex(t, r"(?m)^\s*(import|export)\b")  # a classic worker: no modules
+        self.assertIn("nocturne-share", t)
 
 
 if __name__ == "__main__":

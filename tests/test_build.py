@@ -150,12 +150,15 @@ class BuildTests(unittest.TestCase):
             build.build(self.root)
 
     def test_out_dir(self):
-        (self.root / "admin").mkdir(); (self.root / "admin" / "index.html").write_text("x")
+        (self.root / "admin" / "icons").mkdir(parents=True); (self.root / "admin" / "index.html").write_text("x")
+        for p in ("manifest.webmanifest", "sw.js", "icons/icon-512.png"):
+            (self.root / "admin" / p).write_text("x")
         (self.root / "queue" / "q").mkdir(parents=True); (self.root / "queue" / "q" / "item.json").write_text("{}")
         out = Path(tempfile.mkdtemp()) / "_site"
         self.addCleanup(shutil.rmtree, out.parent, ignore_errors=True)
         build.build(self.root, out)
         for p in ("index.html", "en/index.html", "photos/thumb/a1.jpg", "photos/full/n1.jpg", "admin/index.html",
+                  "admin/manifest.webmanifest", "admin/sw.js", "admin/icons/icon-512.png",
                   "icons/icon-512.png", "manifest.webmanifest", "sw.js"):
             self.assertTrue((out / p).exists(), p)
         for p in ("index.html", "sw.js", "manifest.webmanifest"):

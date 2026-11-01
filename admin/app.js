@@ -6,6 +6,9 @@
 // written to storage, never logged, never put in a URL. Storage holds only the login on its way to GitHub and back
 // (sessionStorage) and two flags: this browser has logged in before (localStorage), and this tab already went to
 // GitHub on its own once (sessionStorage), so a failed login shows the button instead of going round again.
+// Photos shared to this page from a phone's share sheet wait in the cache nocturne-share (admin/sw.js puts them there,
+// lib/shared.js reads them). The login screen says how many wait; after the login the "새 사진" tab opens and offers
+// them (올리기 / 버리기). Nothing is uploaded or discarded without the person saying so.
 // Views get ctx = {gh, config, refreshStatus, reloadExhibit}:
 //   gh             the GitHub client's methods; a rejected token anywhere sends the page back to the login screen
 //   config         resolveConfig(location): repo, siteWorkflow, api, pollMs, and where the login goes
@@ -21,11 +24,13 @@ import {
   saveLogin, takeLogin,
 } from './lib/auth.js';
 import { AuthError, GitHub, GitHubError } from './lib/github.js';
+import { pendingShares } from './lib/shared.js';
 import { SiteStatus } from './lib/sitestatus.js';
 import { renderExhibit } from './views/exhibit.js';
 import { addFiles, closeQueue, renderQueue } from './views/queue.js';
 
 const SITE_TEXT = { busy: '사이트 반영 중…', done: '반영됨', failed: '반영 실패' };
+const sharedWaiting = (n) => `공유한 사진 ${n}장이 기다리고 있어요. 로그인하면 올릴 수 있어요`;
 
 const config = resolveConfig(window.location);
 const $ = (id) => document.getElementById(id);
@@ -89,6 +94,15 @@ function openLogin(message = '', isError = false) {
   const button = $('login-start');
   button.removeAttribute('aria-disabled');
   button.focus();
+  noteShared();
+}
+
+/** Under the login note: how many shared photos wait (nothing when none, or when the cache cannot be read). */
+async function noteShared() {
+  const note = $('login-shared');
+  const found = await pendingShares(globalThis.caches);
+  note.textContent = found.length > 0 ? sharedWaiting(found.length) : '';
+  note.hidden = found.length === 0;
 }
 
 function enter(github) {
@@ -99,6 +113,13 @@ function enter(github) {
   refreshStatus();
   renderQueue($('panel-new'), ctx);
   renderExhibit($('panel-exhibit'), ctx);
+  openSharedTab(github);
+}
+
+/** Shared photos wait: show the "새 사진" tab, where they are offered (the focus follows only if it was on a tab). */
+async function openSharedTab(github) {
+  if ((await pendingShares(globalThis.caches)).length === 0 || client !== github) return;
+  selectTab(tabs[0], tabs.includes(document.activeElement));
 }
 
 /**
@@ -283,6 +304,11 @@ if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
 }
 
 forget(local, OLD_TOKEN_KEY); // the sealed token of the old paste-a-token login
+
+// The worker that receives photos from the share sheet (admin/sw.js; scope admin/). Without it the page works the same.
+if ('serviceWorker' in navigator && /^https?:$/.test(window.location.protocol)) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 
 const got = readReturn(window.location);
 const action = bootAction({

@@ -1,5 +1,7 @@
 // The "새 사진" tab: photos picked (or dropped) here are made safe in the browser and sent, one commit each, to
 // queue/<name>/ (full.jpg, thumb.jpg, item.json); the PC helper or GitHub Actions then drafts and publishes them.
+// Above the picker, photos shared from a phone's share sheet (lib/shared.js) wait for 올리기 (the same path as a
+// picked photo) or 버리기; nothing shared is uploaded or removed until the person chooses.
 // Below the picker, every item in queue/ with its status, and what a person can do about it: 다시 올리기 (an upload
 // that did not go through), 버리기, and for an item the AI gave up on, 다시 시도 or 직접 입력해서 게시.
 //
@@ -14,6 +16,7 @@ import { addPhoto, allNames, GalleryError, serialize } from '../lib/gallery.js';
 import { ImageError, processPhoto } from '../lib/image.js';
 import { nameFor, uniqueName } from '../lib/names.js';
 import { canDiscard, hint, label, newItem, toWaiting } from '../lib/queue.js';
+import { dropShares, pendingShares } from '../lib/shared.js';
 
 const DATA = 'src/photos.json';
 const QUEUE = 'queue';
@@ -595,6 +598,7 @@ export function renderQueue(root, ctx) {
   view.ctx = ctx;
   view.store.gh = ctx.gh;
   view.store.repo = ctx.config.repo;
+  refreshShares(view);
   return load(view);
 }
 
@@ -628,6 +632,13 @@ function build(root) {
   const pick = button('사진 고르기', 'btn btn-main');
   const zone = el('div', 'q-drop', pick, el('p', 'q-drop-text', '여기에 끌어다 놓아도 돼요. 위치 정보는 올리기 전에 이 기기에서 지워요.'), input);
 
+  const shareText = el('p', 'msg');
+  const shareUpload = button('올리기', 'btn btn-main');
+  const shareDiscard = button('버리기', 'btn');
+  const share = el('div', 'q-share', shareText, el('div', 'q-actions', shareUpload, shareDiscard));
+  share.setAttribute('role', 'status');
+  share.hidden = true;
+
   const heading = el('h2', 'q-title', '대기열');
   const status = live(el('p', 'msg'));
   status.tabIndex = -1; // focus lands here when the card that had it leaves the list
@@ -638,10 +649,11 @@ function build(root) {
   const list = el('ul', 'q-cards');
   list.setAttribute('aria-labelledby', 'q-title');
   heading.id = 'q-title';
-  root.replaceChildren(zone, el('div', 'q-top', heading, status, retry), empty, list);
+  root.replaceChildren(share, zone, el('div', 'q-top', heading, status, retry), empty, list);
 
   const v = { root, ctx: null, store: new QueueStore(null, null), list, status, retry, empty, loaded: false,
-    nodes: new Map(), fading: new Set(), later: new Set(), timer: 0, polling: false, ids: 0 };
+    nodes: new Map(), fading: new Set(), later: new Set(), timer: 0, polling: false, ids: 0,
+    pick, share, shareText, shares: [], shareSeq: 0 };
   v.store.onChange = () => draw(v);
 
   const take = (files) => {
@@ -681,7 +693,51 @@ function build(root) {
     });
   }
   retry.addEventListener('click', () => load(v));
+  shareUpload.addEventListener('click', () => uploadShares(v));
+  shareDiscard.addEventListener('click', () => discardShares(v));
   return v;
+}
+
+// --- photos shared from the phone's share sheet ---
+
+/** Read the shared photos again and show (or hide) the line above the picker. A read that an action overtook is dropped. */
+async function refreshShares(v) {
+  const seq = ++v.shareSeq;
+  const found = await pendingShares(globalThis.caches); // never rejects: [] when there is nothing, or no cache storage
+  if (v !== view || seq !== v.shareSeq) return;
+  v.shares = found;
+  drawShares(v);
+}
+
+function drawShares(v) {
+  const count = v.shares.length;
+  v.share.hidden = count === 0;
+  say(v.shareText, count > 0 ? `공유한 사진 ${count}장` : '');
+}
+
+/** The photos the line was offering, now handed over: the line goes at once (so nothing is taken twice). */
+function takeShares(v) {
+  const taken = v.shares;
+  const hadFocus = v.share.contains(document.activeElement);
+  v.shareSeq += 1; // a read in flight would bring them back
+  v.shares = [];
+  drawShares(v);
+  if (hadFocus) v.pick.focus(); // the buttons are gone; the focus would fall back to the top of the page
+  return taken;
+}
+
+/** 올리기: the photos go in as if they had been picked (cards at once), then leave the cache. */
+async function uploadShares(v) {
+  if (v !== view || v.shares.length === 0) return;
+  const taken = takeShares(v);
+  v.store.addFiles(taken.map((s) => s.file)); // the cards are there now; the photos are held in memory
+  await dropShares(globalThis.caches, taken.map((s) => s.key));
+}
+
+/** 버리기: gone from the cache; nothing was uploaded. */
+async function discardShares(v) {
+  if (v !== view || v.shares.length === 0) return;
+  await dropShares(globalThis.caches, takeShares(v).map((s) => s.key));
 }
 
 /** Read the queue and photos.json, then draw; keeps looking while anything is in the queue. */
